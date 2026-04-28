@@ -257,6 +257,141 @@ npm run backfill -- --from 320000000 --to 320000050 --mode logs --resume
 - `payouts`：对 `tx.from`、flash loan caller/receiver 等关键地址做 ERC20 净流入提取，并补充“关键地址向外部终局地址分发”的 payout 线索
 - `routeHints`：如 `flash-loan -> payout`、`morpho-free-flash-loan` 这类便于后续前端聚类的路径提示
 
+## 数据格式
+
+运行时主要会写两类文件：
+
+- `OUTPUT_PATH`
+  默认 `./data/candidates.jsonl`
+- `CHECKPOINT_PATH`
+  默认 `./data/checkpoints.json`
+
+为了方便人工和 AI 阅读，仓库里附带了两份静态样例：
+
+- [examples/candidates.sample.jsonl](/Users/edy/lucas/chance-arb-arbitrage/examples/candidates.sample.jsonl:1)
+- [examples/checkpoints.sample.json](/Users/edy/lucas/chance-arb-arbitrage/examples/checkpoints.sample.json:1)
+
+### `candidates.jsonl`
+
+- 文件格式：`JSONL`
+- 一行一条 `Candidate`
+- 每行都是完整 JSON 对象，适合 `tail -F`、grep、流式消费
+
+字段结构：
+
+```json
+{
+  "blockNumber": 457041846,
+  "chainName": "arbitrum",
+  "evidence": ["..."],
+  "flashLoans": [
+    {
+      "amountWei": "332645654622239468",
+      "asset": "0x82af...",
+      "callback": "onMorphoFlashLoan",
+      "caller": "0x860a...",
+      "initiator": null,
+      "premiumWei": "0",
+      "protocol": "morpho",
+      "provider": "0x6c24...",
+      "receiver": "0x860a..."
+    }
+  ],
+  "from": "0x6666...",
+  "gasUsedWei": "653598",
+  "metrics": {
+    "flashLoanAmountWei": "332645654622239468",
+    "flashLoanCount": 1,
+    "payoutAddressCount": 1,
+    "payoutTokenCount": 1,
+    "reserveShiftDownWei": "333698470268187288",
+    "reserveShiftUpWei": "0",
+    "swapEvents": 1,
+    "swapPools": 1,
+    "wethDepositWei": "0",
+    "wethWithdrawalWei": "0"
+  },
+  "payouts": [
+    {
+      "kind": "external-transfer",
+      "netAmountWei": "1086076885286110",
+      "recipient": "0x4f46...",
+      "token": "0x82af..."
+    }
+  ],
+  "protocols": ["aave-v3", "morpho", "uniswap-v3-like"],
+  "routeHints": ["flash-loan -> payout", "flash-loan-open"],
+  "score": 8,
+  "summary": "tags=flash-loan,payout,...",
+  "tags": ["flash-loan", "payout", "vault-share-discount-redeem"],
+  "timestamp": 1777332244,
+  "to": "0x860a...",
+  "txHash": "0xde00...",
+  "txIndex": 2
+}
+```
+
+字段说明：
+
+- `blockNumber` / `txHash` / `txIndex`
+  候选交易定位信息
+- `from` / `to`
+  原始交易发起方和目标地址
+- `tags`
+  当前分类器给出的候选标签
+- `score`
+  启发式分数，用于粗排序
+- `summary`
+  为 grep / 终端日志压缩过的一行摘要
+- `protocols`
+  本笔交易触达过的协议集合
+- `routeHints`
+  更偏路径视角的提示，如 `flash-loan -> payout`
+- `flashLoans`
+  识别到的 flash loan / flash leg 列表
+- `payouts`
+  候选 payout 线索
+  `kind=net-inflow` 表示关键地址净流入
+  `kind=external-transfer` 表示关键地址向外部终局地址分发
+- `metrics`
+  一些适合统计和筛选的数值字段
+- `evidence`
+  原始启发式证据文本，便于人工复盘
+
+### `checkpoints.json`
+
+- 文件格式：普通 JSON
+- 用来记录 live / backfill 的运行进度
+
+字段结构：
+
+```json
+{
+  "backfills": {
+    "logs:320000000:320000050": {
+      "fromBlock": 320000000,
+      "mode": "logs",
+      "nextBlock": 320000021,
+      "toBlock": 320000050,
+      "updatedAt": "2026-04-28T07:00:00.000Z"
+    }
+  },
+  "live": {
+    "blockPollNextBlock": 457153000,
+    "wsSyncedBlock": 457153228
+  }
+}
+```
+
+字段说明：
+
+- `backfills`
+  每个历史回扫任务的游标，key 形如 `logs:from:to`
+- `live.blockPollNextBlock`
+  `block-poll` 模式下次要扫的块高
+- `live.wsSyncedBlock`
+  `ws-flashloan` 最近确认已经补齐到的块高
+
 ## 运行建议
 
 - 如果你的 RPC 对 `eth_getLogs` block range 限得很紧，把 `LOG_BACKFILL_BLOCK_SPAN` 设小一点，例如 `10`

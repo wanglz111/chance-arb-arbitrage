@@ -1,0 +1,15 @@
+{
+  "backfills": {
+    "logs:320000000:320000050": {
+      "fromBlock": 320000000,
+      "mode": "logs",
+      "nextBlock": 320000021,
+      "toBlock": 320000050,
+      "updatedAt": "2026-04-28T07:00:00.000Z"
+    }
+  },
+  "live": {
+    "blockPollNextBlock": 457153000,
+    "wsSyncedBlock": 457153228
+  }
+}
