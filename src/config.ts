@@ -103,6 +103,7 @@ export function loadConfig(): AppConfig {
     pollIntervalMs: parseInteger("POLL_INTERVAL_MS", 1_500),
     rpcUrl,
     startBlock: optional("START_BLOCK") ? parseInteger("START_BLOCK", 0) : null,
+    wsCheckpointIntervalMs: Math.max(1_000, parseInteger("WS_CHECKPOINT_INTERVAL_MS", 60_000)),
     wsReconnectDelayMs: parseInteger("WS_RECONNECT_DELAY_MS", 5_000),
     wsRpcUrl,
     wsSignalDedupMs: parseInteger("WS_SIGNAL_DEDUP_MS", 30_000)

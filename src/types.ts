@@ -42,6 +42,7 @@ export type AppConfig = {
   rpcUrl: string;
   startBlock: number | null;
   wsReconnectDelayMs: number;
+  wsCheckpointIntervalMs: number;
   wsRpcUrl: string | null;
   wsSignalDedupMs: number;
 };

@@ -51,6 +51,7 @@ cp .env.example .env
 ```env
 LIVE_MODE=ws-flashloan
 WS_RPC_URL=wss://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
+WS_CHECKPOINT_INTERVAL_MS=60000
 OUTPUT_PATH=/app/data/candidates.jsonl
 CHECKPOINT_PATH=/app/data/checkpoints.json
 ```
@@ -173,6 +174,8 @@ npm run start
 ```env
 LIVE_MODE=ws-flashloan
 WS_RPC_URL=wss://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
+# optional; default is 60000
+WS_CHECKPOINT_INTERVAL_MS=60000
 ```
 
 然后运行：
@@ -181,7 +184,7 @@ WS_RPC_URL=wss://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
 npm run start:ws
 ```
 
-默认会把 live 进度写到 `CHECKPOINT_PATH`，重连后先做一次缺口补扫，再继续订阅。
+默认会把 live 进度写到 `CHECKPOINT_PATH`，重连后先做一次缺口补扫，再继续订阅。`ws-flashloan` 只订阅 flash loan `logs`，不会订阅 `newHeads`；`wsSyncedBlock` 由低频 `eth_blockNumber` 轮询推进，间隔可用 `WS_CHECKPOINT_INTERVAL_MS` 调整。
 
 ## 分析单笔交易
 

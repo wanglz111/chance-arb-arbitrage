@@ -30,6 +30,7 @@ export class CandidateDiscoveryService {
   private readonly signalTxsInFlight = new Set<string>();
 
   private wsProvider: WebSocketProvider | null = null;
+  private stopWsCheckpointLoop: (() => void) | null = null;
 
   constructor(private readonly config: AppConfig) {
     this.checkpoints = new CheckpointStore(config.checkpointPath);
@@ -38,6 +39,11 @@ export class CandidateDiscoveryService {
   }
 
   public async destroy(): Promise<void> {
+    if (this.stopWsCheckpointLoop) {
+      this.stopWsCheckpointLoop();
+      this.stopWsCheckpointLoop = null;
+    }
+
     if (this.wsProvider) {
       await this.wsProvider.destroy();
       this.wsProvider = null;
@@ -168,7 +174,7 @@ export class CandidateDiscoveryService {
 
     const subscriptions = this.getFlashLoanSignalSubscriptions();
     logInfo(
-      `[live] mode=ws-flashloan chain=${this.config.chainName} confirmations=${this.config.finalityConfirmations} reconnectMs=${this.config.wsReconnectDelayMs} dedupMs=${this.config.wsSignalDedupMs} signals=${subscriptions.map((item) => item.label).join(",")}`
+      `[live] mode=ws-flashloan chain=${this.config.chainName} confirmations=${this.config.finalityConfirmations} checkpointIntervalMs=${this.config.wsCheckpointIntervalMs} reconnectMs=${this.config.wsReconnectDelayMs} dedupMs=${this.config.wsSignalDedupMs} signals=${subscriptions.map((item) => item.label).join(",")}`
     );
 
     while (true) {
@@ -190,13 +196,7 @@ export class CandidateDiscoveryService {
 
         await provider.getNetwork();
         await this.catchUpFlashLoanSignals();
-
-        provider.on("block", (blockNumber) => {
-          const syncedBlock = blockNumber - this.config.finalityConfirmations;
-          if (syncedBlock >= 0) {
-            this.checkpoints.setWsSyncedBlock(syncedBlock);
-          }
-        });
+        this.stopWsCheckpointLoop = this.startWsCheckpointLoop();
 
         for (const subscription of subscriptions) {
           provider.on(subscription.filter, (log) => {
@@ -210,6 +210,11 @@ export class CandidateDiscoveryService {
       } catch (error) {
         logError(String(error instanceof Error ? error.stack ?? error.message : error));
       } finally {
+        if (this.stopWsCheckpointLoop) {
+          this.stopWsCheckpointLoop();
+          this.stopWsCheckpointLoop = null;
+        }
+
         if (this.wsProvider) {
           await this.wsProvider.destroy().catch(() => undefined);
           this.wsProvider = null;
@@ -350,6 +355,51 @@ export class CandidateDiscoveryService {
     logInfo(`[ws-catchup] from=${fromBlock} to=${targetBlock}`);
     await this.backfillRangeByLogs(fromBlock, targetBlock, false);
     this.checkpoints.setWsSyncedBlock(targetBlock);
+  }
+
+  private startWsCheckpointLoop(): () => void {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const schedule = () => {
+      timer = setTimeout(() => {
+        void tick();
+      }, this.config.wsCheckpointIntervalMs);
+    };
+
+    const tick = async () => {
+      if (stopped) return;
+
+      try {
+        await this.advanceWsSyncedCheckpoint();
+      } catch (error) {
+        logWarn(`[ws-checkpoint] error=${String(error instanceof Error ? error.message : error)}`);
+      }
+
+      if (!stopped) {
+        schedule();
+      }
+    };
+
+    schedule();
+
+    return () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+  }
+
+  private async advanceWsSyncedCheckpoint(): Promise<void> {
+    const latest = await this.fetcher.getLatestBlockNumber();
+    const syncedBlock = Math.max(0, latest - this.config.finalityConfirmations);
+    const current = this.checkpoints.getWsSyncedBlock();
+
+    if (current === null || syncedBlock > current) {
+      this.checkpoints.setWsSyncedBlock(syncedBlock);
+    }
   }
 
   private async findFlashLoanSignalTransactionHashes(fromBlock: number, toBlock: number): Promise<string[]> {
