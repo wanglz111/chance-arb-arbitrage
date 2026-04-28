@@ -3,6 +3,7 @@ const state = {
   filters: {
     flashLoanOnly: false,
     limit: 50,
+    minScore: 0,
     offset: 0,
     payoutOnly: false,
     protocol: "",
@@ -29,59 +30,22 @@ const elements = {
   payoutCandidates: document.querySelector("#payoutCandidates"),
   payoutOnly: document.querySelector("#payoutOnly"),
   prevButton: document.querySelector("#prevButton"),
-  protocolChips: document.querySelector("#protocolChips"),
   protocolSelect: document.querySelector("#protocolSelect"),
   refreshButton: document.querySelector("#refreshButton"),
   resultsMeta: document.querySelector("#resultsMeta"),
   resultsTitle: document.querySelector("#resultsTitle"),
   routeHintSelect: document.querySelector("#routeHintSelect"),
   searchInput: document.querySelector("#searchInput"),
+  scoreSevenNewest: document.querySelector("#scoreSevenNewest"),
   sortSelect: document.querySelector("#sortSelect"),
-  tagChips: document.querySelector("#tagChips"),
   tagSelect: document.querySelector("#tagSelect"),
   template: document.querySelector("#candidateTemplate"),
   totalCandidates: document.querySelector("#totalCandidates")
 };
 
-const TOKEN_LABELS = new Map([
-  ["0x82af49447d8a07e3bd95bd0d56f35241523fbab1", "WETH"],
-  ["0xe50fa9b3c56ffb159cb0fca61f5c9d750e8128c8", "aArbWETH"],
-  ["0xaf88d065e77c8cc2239327c5edb3a432268e5831", "USDC"],
-  ["0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", "USDC.e"],
-  ["0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", "USDT"],
-  ["0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", "DAI"],
-  ["0x2f2a2543b76a4166549f7aaab2e75bef0eaefc5b", "WBTC"],
-  ["0x912ce59144191c1204e64559fe8253a0e49e6548", "ARB"],
-  ["0x5979d7b546e38e414f7e9822514be443a4800529", "wstETH"],
-  ["0x35751007a407ca6feffe80b3cb397736d2cf4dbe", "weETH"],
-  ["0xec70dc2877b6f5081d14c2d3d8cc1552d65be8dc", "rETH"],
-  ["0x17fc002b466eec40dae837fc4be5c67993ddbd6f", "FRAX"],
-  ["0xfa7f8980b0f1e64a2062791cc3b0871572f1f7f0", "UNI"],
-  ["0xfc5a1a6eb076a6c7c3e7c8b2fefafcce2eebd0a8", "GMX"]
-]);
-
 function formatAddress(value) {
   if (!value) return "-";
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
-}
-
-function formatToken(value) {
-  if (!value) return "-";
-  const symbol = TOKEN_LABELS.get(value.toLowerCase());
-  if (!symbol) return formatAddress(value);
-  return `${symbol} · ${formatAddress(value)}`;
-}
-
-function formatTokenInline(value) {
-  if (!value) return "-";
-  const symbol = TOKEN_LABELS.get(value.toLowerCase());
-  return symbol ? `${symbol}(${value})` : value;
-}
-
-function formatEvidence(value) {
-  if (!value) return "-";
-
-  return value.replaceAll(/0x[a-fA-F0-9]{40}/g, (match) => formatTokenInline(match.toLowerCase()));
 }
 
 function formatNumber(value) {
@@ -92,21 +56,29 @@ function formatScore(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
+function scoreTone(value) {
+  if (value >= 8) return "score-hot";
+  if (value >= 6) return "score-high";
+  if (value >= 4) return "score-mid";
+  return "score-low";
+}
+
 function formatTimestamp(value) {
   if (!value) return "-";
-  return new Date(value * 1000).toLocaleString();
+  return new Date(value * 1000).toLocaleString("zh-CN", {
+    day: "numeric",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    month: "numeric",
+    second: "2-digit",
+    year: "numeric"
+  });
 }
 
 function formatUpdatedAt(value) {
   if (!value) return "No data yet";
   return new Date(value).toLocaleString();
-}
-
-function escapeHtml(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
 
 function setSelectOptions(select, items, fallbackLabel) {
@@ -135,31 +107,17 @@ function createChip(text, tone = "neutral") {
   return chip;
 }
 
-function createFilterChip(item, type) {
-  const button = document.createElement("button");
-  button.className = "chip-button";
-  button.type = "button";
-  button.textContent = `${item.value} (${item.count})`;
-  button.addEventListener("click", () => {
-    state.filters.offset = 0;
+function appendChips(container, items, tone) {
+  if (!items || items.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "empty-value";
+    empty.textContent = "-";
+    container.append(empty);
+    return;
+  }
 
-    if (type === "tag") {
-      state.filters.tag = item.value;
-      elements.tagSelect.value = item.value;
-    } else {
-      state.filters.protocol = item.value;
-      elements.protocolSelect.value = item.value;
-    }
-
-    void loadCandidates();
-  });
-  return button;
-}
-
-function setChipBar(container, items, type) {
-  container.innerHTML = "";
-  for (const item of items.slice(0, 8)) {
-    container.append(createFilterChip(item, type));
+  for (const item of items) {
+    container.append(createChip(item, tone));
   }
 }
 
@@ -172,6 +130,12 @@ function syncFiltersFromForm() {
   state.filters.limit = Number.parseInt(elements.limitSelect.value, 10);
   state.filters.flashLoanOnly = elements.flashLoanOnly.checked;
   state.filters.payoutOnly = elements.payoutOnly.checked;
+  state.filters.minScore = elements.scoreSevenNewest.checked ? 7 : 0;
+
+  if (elements.scoreSevenNewest.checked) {
+    state.filters.sort = "newest";
+    elements.sortSelect.value = "newest";
+  }
 }
 
 function paramsFromFilters() {
@@ -184,6 +148,7 @@ function paramsFromFilters() {
     }
 
     if (value !== "" && value !== null && value !== undefined) {
+      if (key === "minScore" && value === 0) continue;
       params.set(key, String(value));
     }
   }
@@ -204,101 +169,32 @@ function renderSummary(summaryPayload) {
   setSelectOptions(elements.tagSelect, summary.tags, "All tags");
   setSelectOptions(elements.protocolSelect, summary.protocols, "All protocols");
   setSelectOptions(elements.routeHintSelect, summary.routeHints, "All route hints");
-  setChipBar(elements.tagChips, summary.tags, "tag");
-  setChipBar(elements.protocolChips, summary.protocols, "protocol");
-}
-
-function renderFlashLoan(item) {
-  const line = document.createElement("div");
-  line.className = "stack-card";
-  line.innerHTML = `
-    <strong>${item.protocol}</strong>
-    <span>${formatToken(item.asset)} · amount ${item.amountWei}</span>
-    <span>callback ${item.callback}</span>
-    <span>receiver ${formatAddress(item.receiver)} · caller ${formatAddress(item.caller)}</span>
-  `;
-  return line;
-}
-
-function renderPayout(item) {
-  const line = document.createElement("div");
-  line.className = "stack-card";
-  line.innerHTML = `
-    <strong>${formatAddress(item.recipient)}</strong>
-    <span>token ${formatToken(item.token)}</span>
-    <span>kind ${item.kind}</span>
-    <span>net ${item.netAmountWei}</span>
-  `;
-  return line;
 }
 
 function renderCandidate(candidate) {
   const fragment = elements.template.content.cloneNode(true);
   const card = fragment.querySelector(".candidate-card");
   const tx = fragment.querySelector(".candidate-tx");
-  const scoreBadge = fragment.querySelector(".score-badge");
+  const scoreLine = fragment.querySelector(".score-line");
   const subtitle = fragment.querySelector(".candidate-subtitle");
-  const link = fragment.querySelector(".external-link");
+  const arbiscanLink = fragment.querySelector(".arbiscan-link");
+  const blocksecLink = fragment.querySelector(".blocksec-link");
   const tags = fragment.querySelector(".candidate-tags");
   const protocols = fragment.querySelector(".candidate-protocols");
   const routeHints = fragment.querySelector(".candidate-route-hints");
-  const routeSection = fragment.querySelector(".route-hints-section");
-  const flashLoanSection = fragment.querySelector(".flash-loans-section");
-  const flashLoans = fragment.querySelector(".candidate-flash-loans");
-  const payoutsSection = fragment.querySelector(".payouts-section");
-  const payouts = fragment.querySelector(".candidate-payouts");
-  const evidenceSection = fragment.querySelector(".evidence-section");
-  const evidenceList = fragment.querySelector(".evidence-list");
-  const rawJson = fragment.querySelector(".raw-json");
 
-  tx.textContent = `${candidate.txHash.slice(0, 12)}...${candidate.txHash.slice(-8)}`;
-  scoreBadge.textContent = `score ${candidate.score}`;
+  tx.textContent = candidate.txHash;
+  scoreLine.textContent = `score ${formatScore(candidate.score)}`;
+  scoreLine.classList.add(scoreTone(candidate.score));
+  card.classList.add(`card-${scoreTone(candidate.score)}`);
   subtitle.textContent = `block ${candidate.blockNumber} · txIndex ${candidate.txIndex ?? "-"} · ${formatTimestamp(candidate.timestamp)} · from ${formatAddress(candidate.from)} · to ${formatAddress(candidate.to)}`;
-  link.href = `https://arbiscan.io/tx/${candidate.txHash}`;
+  arbiscanLink.href = `https://arbiscan.io/tx/${candidate.txHash}`;
+  blocksecLink.href = `https://app.blocksec.com/phalcon/explorer/tx/arbitrum/${candidate.txHash}`;
 
-  for (const tag of candidate.tags) {
-    tags.append(createChip(tag, "tag"));
-  }
+  appendChips(tags, candidate.tags, "tag");
+  appendChips(protocols, candidate.protocols, "protocol");
+  appendChips(routeHints, candidate.routeHints, "hint");
 
-  for (const protocol of candidate.protocols) {
-    protocols.append(createChip(protocol, "protocol"));
-  }
-
-  if (candidate.routeHints.length === 0) {
-    routeSection.hidden = true;
-  } else {
-    for (const hint of candidate.routeHints) {
-      routeHints.append(createChip(hint, "hint"));
-    }
-  }
-
-  if (candidate.flashLoans.length === 0) {
-    flashLoanSection.hidden = true;
-  } else {
-    for (const item of candidate.flashLoans) {
-      flashLoans.append(renderFlashLoan(item));
-    }
-  }
-
-  if (candidate.payouts.length === 0) {
-    payoutsSection.hidden = true;
-  } else {
-    for (const item of candidate.payouts) {
-      payouts.append(renderPayout(item));
-    }
-  }
-
-  if (candidate.evidence.length === 0) {
-    evidenceSection.hidden = true;
-  } else {
-    for (const evidence of candidate.evidence) {
-      const li = document.createElement("li");
-      li.textContent = formatEvidence(evidence);
-      evidenceList.append(li);
-    }
-  }
-
-  rawJson.innerHTML = escapeHtml(JSON.stringify(candidate, null, 2));
   card.dataset.score = String(candidate.score);
   return fragment;
 }

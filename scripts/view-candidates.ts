@@ -33,6 +33,7 @@ type Dataset = {
 type CandidateQuery = {
   flashLoanOnly: boolean;
   limit: number;
+  minScore: number;
   offset: number;
   payoutOnly: boolean;
   protocol: string;
@@ -165,6 +166,7 @@ function parseQuery(url: URL): CandidateQuery {
   return {
     flashLoanOnly: parseBoolean(url.searchParams.get("flashLoanOnly")),
     limit: Math.max(1, Math.min(200, parseInteger(url.searchParams.get("limit"), 50))),
+    minScore: Math.max(0, parseInteger(url.searchParams.get("minScore"), 0)),
     offset: Math.max(0, parseInteger(url.searchParams.get("offset"), 0)),
     payoutOnly: parseBoolean(url.searchParams.get("payoutOnly")),
     protocol: url.searchParams.get("protocol")?.trim() ?? "",
@@ -201,6 +203,7 @@ function filterCandidates(candidates: Candidate[], query: CandidateQuery): Candi
     if (query.routeHint && !candidate.routeHints.includes(query.routeHint)) return false;
     if (query.flashLoanOnly && candidate.flashLoans.length === 0) return false;
     if (query.payoutOnly && candidate.payouts.length === 0) return false;
+    if (query.minScore > 0 && candidate.score < query.minScore) return false;
     if (query.q && !candidateSearchText(candidate).includes(query.q)) return false;
     return true;
   });
