@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chance Arb Candidate Viewer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Chance Arb Viewer</p>
+          <h1>候选样本浏览器</h1>
+          <p class="hero-copy">
+            先看结构，再看路径。这个页面优先服务于 flash loan 学习和经典路径归纳。
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refreshButton" class="button primary" type="button">Refresh</button>
+          <label class="toggle">
+            <input id="autoRefreshToggle" type="checkbox" />
+            <span>Auto refresh 15s</span>
+          </label>
+        </div>
+      </header>
+
+      <section class="summary-grid" id="summaryGrid">
+        <article class="stat-card">
+          <span class="stat-label">Total</span>
+          <strong class="stat-value" id="totalCandidates">-</strong>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">Flash Loan</span>
+          <strong class="stat-value" id="flashLoanCandidates">-</strong>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">Payout</span>
+          <strong class="stat-value" id="payoutCandidates">-</strong>
+        </article>
+        <article class="stat-card">
+          <span class="stat-label">Avg Score</span>
+          <strong class="stat-value" id="averageScore">-</strong>
+        </article>
+      </section>
+
+      <section class="panel filters-panel">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Filters</p>
+            <h2>按路径切样本</h2>
+          </div>
+          <p class="panel-note" id="datasetMeta">-</p>
+        </div>
+
+        <form id="filterForm" class="filter-grid">
+          <label class="field field-wide">
+            <span>Search</span>
+            <input id="searchInput" name="q" type="search" placeholder="tx hash / address / evidence / route hint" />
+          </label>
+
+          <label class="field">
+            <span>Tag</span>
+            <select id="tagSelect" name="tag">
+              <option value="">All tags</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Protocol</span>
+            <select id="protocolSelect" name="protocol">
+              <option value="">All protocols</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Route Hint</span>
+            <select id="routeHintSelect" name="routeHint">
+              <option value="">All route hints</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Sort</span>
+            <select id="sortSelect" name="sort">
+              <option value="newest">Newest</option>
+              <option value="score-desc">Score desc</option>
+              <option value="score-asc">Score asc</option>
+              <option value="oldest">Oldest</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Page Size</span>
+            <select id="limitSelect" name="limit">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+
+          <label class="toggle">
+            <input id="flashLoanOnly" name="flashLoanOnly" type="checkbox" />
+            <span>Flash loan only</span>
+          </label>
+
+          <label class="toggle">
+            <input id="payoutOnly" name="payoutOnly" type="checkbox" />
+            <span>Payout only</span>
+          </label>
+        </form>
+
+        <div class="chip-section">
+          <div>
+            <p class="chip-title">Popular tags</p>
+            <div class="chip-row" id="tagChips"></div>
+          </div>
+          <div>
+            <p class="chip-title">Popular protocols</p>
+            <div class="chip-row" id="protocolChips"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Results</p>
+            <h2 id="resultsTitle">Candidates</h2>
+          </div>
+          <div class="pager">
+            <button id="prevButton" class="button" type="button">Prev</button>
+            <span id="pageInfo">-</span>
+            <button id="nextButton" class="button" type="button">Next</button>
+          </div>
+        </div>
+
+        <div id="resultsMeta" class="results-meta">-</div>
+        <div id="candidateList" class="candidate-list"></div>
+      </section>
+    </div>
+
+    <template id="candidateTemplate">
+      <article class="candidate-card">
+        <div class="candidate-head">
+          <div>
+            <div class="candidate-title-row">
+              <strong class="candidate-tx"></strong>
+              <span class="score-badge"></span>
+            </div>
+            <div class="candidate-subtitle"></div>
+          </div>
+          <a class="external-link" target="_blank" rel="noreferrer">Arbiscan</a>
+        </div>
+
+        <div class="candidate-section">
+          <span class="section-label">Tags</span>
+          <div class="chip-row candidate-tags"></div>
+        </div>
+
+        <div class="candidate-section">
+          <span class="section-label">Protocols</span>
+          <div class="chip-row candidate-protocols"></div>
+        </div>
+
+        <div class="candidate-section route-hints-section">
+          <span class="section-label">Route Hints</span>
+          <div class="chip-row candidate-route-hints"></div>
+        </div>
+
+        <div class="candidate-section flash-loans-section">
+          <span class="section-label">Flash Loans</span>
+          <div class="stack candidate-flash-loans"></div>
+        </div>
+
+        <div class="candidate-section payouts-section">
+          <span class="section-label">Payouts</span>
+          <div class="stack candidate-payouts"></div>
+        </div>
+
+        <div class="candidate-section evidence-section">
+          <span class="section-label">Evidence</span>
+          <ul class="evidence-list"></ul>
+        </div>
+
+        <details class="raw-details">
+          <summary>Raw JSON</summary>
+          <pre class="raw-json"></pre>
+        </details>
+      </article>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
