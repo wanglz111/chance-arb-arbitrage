@@ -1,14 +1,21 @@
 export type CandidateTag =
   | "flash-loan"
+  | "payout"
   | "multi-pool-swap"
   | "wrap-unwrap-redeem"
   | "reserve-liquidity-shift"
   | "vault-share-discount-redeem"
   | "liquidation-deleverage-imbalance";
 
-export type FlashLoanProtocol = "aave-v3" | "morpho";
+export type FlashLoanProtocol = "aave-v3" | "balancer-v2" | "morpho" | "uniswap-v3";
+
+export type UniswapV3PoolSnapshot = {
+  token0: string;
+  token1: string;
+};
 
 export type LiveMode = "block-poll" | "ws-flashloan";
+export type BackfillMode = "blocks" | "logs";
 
 export type MonitoredSharePair = {
   label: string;
@@ -19,7 +26,9 @@ export type MonitoredSharePair = {
 
 export type AppConfig = {
   chainName: string;
+  checkpointPath: string;
   finalityConfirmations: number;
+  logBackfillBlockSpan: number;
   liveMode: LiveMode;
   maxConcurrentTransactions: number;
   minCandidateScore: number;
@@ -50,8 +59,13 @@ export type RawTransaction = {
 
 export type RawLog = {
   address: string;
+  blockNumber?: string;
   data: string;
+  logIndex?: string;
+  removed?: boolean;
   topics: string[];
+  transactionHash?: string;
+  transactionIndex?: string;
 };
 
 export type RawReceipt = {
@@ -95,6 +109,7 @@ export type CandidateFlashLoan = {
 };
 
 export type CandidatePayout = {
+  kind: "external-transfer" | "net-inflow";
   netAmountWei: string;
   recipient: string;
   token: string;

@@ -9,6 +9,7 @@ Arbitrum 上的“候选发现”扫描器。它不发单、不抢执行，只�
 当前支持的候选标签：
 
 - `flash-loan`
+- `payout`
 - `multi-pool-swap`
 - `wrap-unwrap-redeem`
 - `reserve-liquidity-shift`
@@ -18,7 +19,9 @@ Arbitrum 上的“候选发现”扫描器。它不发单、不抢执行，只�
 当前已直接识别的 flash loan 入口：
 
 - Aave V3 `FlashLoan` 事件
+- Balancer V2 Vault `FlashLoan` 事件
 - Morpho `FlashLoan` 事件
+- Uniswap V3 pool `Flash` 事件
 
 ## 安装
 
@@ -54,6 +57,8 @@ WS_RPC_URL=wss://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
 npm run start:ws
 ```
 
+默认会把 live 进度写到 `CHECKPOINT_PATH`，重连后先做一次缺口补扫，再继续订阅。
+
 ## 分析单笔交易
 
 ```bash
@@ -84,6 +89,20 @@ npm run view:candidates -- ./data/candidates.jsonl
 npm run backfill -- --from 320000000 --to 320000050
 ```
 
+默认 `backfill` 走 `logs-first` 模式，也就是先按 flash signal 的 `address/topic` 命中交易，再只分析这些 tx，CU 明显低于整块扫描。
+
+如果你想强制整块扫：
+
+```bash
+npm run backfill -- --from 320000000 --to 320000050 --mode blocks
+```
+
+如果回扫中断了，可以用相同参数加 `--resume` 从 checkpoint 继续：
+
+```bash
+npm run backfill -- --from 320000000 --to 320000050 --mode logs --resume
+```
+
 ## 设计思路
 
 这套工具故意停在“研究型扫描器”阶段，不追求自动执行。
@@ -91,11 +110,12 @@ npm run backfill -- --from 320000000 --to 320000050
 - 输入：整块交易和回执
 - 处理：基于 log + 监控 token pair 做启发式分类
 - 输出：候选标签、分数、证据、协议触点，以及更结构化的 flash loan / payout / route hint 数据
+- 状态：本地 checkpoint + `txHash` 去重，降低重复写入和断线遗漏
 
 当前支持两种 live 模式：
 
 - `block-poll`：整块扫描，适合稳定回收所有候选
-- `ws-flashloan`：只订阅 Aave V3 / Morpho 的 flash loan log，适合长期挂着学习经典路径
+- `ws-flashloan`：订阅 Aave V3 / Balancer V2 / Morpho / Uniswap V3 的 flash 信号，再按命中的 tx 做分类
 
 默认配置偏向 Arbitrum + Aave `aArbWETH/WETH` 的机会发现，但你可以通过 `.env` 继续扩充 `MONITORED_RESERVES` 和 `MONITORED_SHARE_PAIRS`。
 
@@ -110,8 +130,14 @@ npm run backfill -- --from 320000000 --to 320000050
 当前结果里除了 `tags / score / evidence`，还会额外输出：
 
 - `flashLoans`：协议、provider、asset、amount、premium、callback、receiver/caller
-- `payouts`：对 `tx.from`、flash loan caller/receiver 等关键地址做 ERC20 净流入提取后的 payout 线索
+- `payouts`：对 `tx.from`、flash loan caller/receiver 等关键地址做 ERC20 净流入提取，并补充“关键地址向外部终局地址分发”的 payout 线索
 - `routeHints`：如 `flash-loan -> payout`、`morpho-free-flash-loan` 这类便于后续前端聚类的路径提示
+
+## 运行建议
+
+- 如果你的 RPC 对 `eth_getLogs` block range 限得很紧，把 `LOG_BACKFILL_BLOCK_SPAN` 设小一点，例如 `10`
+- `OUTPUT_PATH` 继续用 `jsonl` 没问题，研究期足够顺手
+- `CHECKPOINT_PATH` 建议单独放在 `./data/checkpoints.json`
 
 后续如果你要继续扩，我建议先补：
 

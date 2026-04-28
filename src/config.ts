@@ -88,7 +88,9 @@ export function loadConfig(): AppConfig {
 
   return {
     chainName: ARBITRUM_CHAIN_NAME,
+    checkpointPath: path.resolve(process.cwd(), optional("CHECKPOINT_PATH") ?? "./data/checkpoints.json"),
     finalityConfirmations: parseInteger("FINALITY_CONFIRMATIONS", 0),
+    logBackfillBlockSpan: parseInteger("LOG_BACKFILL_BLOCK_SPAN", 10),
     liveMode,
     maxConcurrentTransactions: parseInteger("MAX_CONCURRENT_TRANSACTIONS", 12),
     minCandidateScore: parseInteger("MIN_CANDIDATE_SCORE", 2),

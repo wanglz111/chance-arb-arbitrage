@@ -1,5 +1,7 @@
 import { JsonRpcProvider, toQuantity } from "ethers";
 
+import { uniswapV3LikeInterface } from "./constants.js";
+import type { UniswapV3PoolSnapshot } from "./types.js";
 import type { RawBlock, RawReceipt, RawTransaction } from "./types.js";
 import { mapWithConcurrency } from "./utils.js";
 
@@ -8,8 +10,16 @@ type BlockBundle = {
   receiptsByHash: Map<string, RawReceipt>;
 };
 
+type RawLogFilter = {
+  address?: string;
+  fromBlock: string;
+  toBlock: string;
+  topics?: string[];
+};
+
 export class ChainFetcher {
   private supportsBlockReceipts: boolean | null = null;
+  private readonly uniswapV3PoolCache = new Map<string, Promise<UniswapV3PoolSnapshot | null>>();
 
   public readonly provider: JsonRpcProvider;
 
@@ -60,6 +70,50 @@ export class ChainFetcher {
       block,
       receiptsByHash: new Map(receipts.map((receipt) => [receipt.transactionHash.toLowerCase(), receipt]))
     };
+  }
+
+  public async getLogs(filter: { address?: string; fromBlock: number; toBlock: number; topics?: string[] }): Promise<RawReceipt["logs"]> {
+    return this.provider.send("eth_getLogs", [{
+      address: filter.address,
+      fromBlock: toQuantity(filter.fromBlock),
+      toBlock: toQuantity(filter.toBlock),
+      topics: filter.topics
+    } satisfies RawLogFilter]) as Promise<RawReceipt["logs"]>;
+  }
+
+  public async getUniswapV3PoolSnapshot(poolAddress: string): Promise<UniswapV3PoolSnapshot | null> {
+    const key = poolAddress.toLowerCase();
+    const existing = this.uniswapV3PoolCache.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const task = (async () => {
+      try {
+        const [token0Raw, token1Raw] = await Promise.all([
+          this.provider.call({
+            to: key,
+            data: uniswapV3LikeInterface.encodeFunctionData("token0")
+          }),
+          this.provider.call({
+            to: key,
+            data: uniswapV3LikeInterface.encodeFunctionData("token1")
+          })
+        ]);
+
+        const token0 = String(uniswapV3LikeInterface.decodeFunctionResult("token0", token0Raw)[0]);
+        const token1 = String(uniswapV3LikeInterface.decodeFunctionResult("token1", token1Raw)[0]);
+        return {
+          token0: token0.toLowerCase(),
+          token1: token1.toLowerCase()
+        };
+      } catch {
+        return null;
+      }
+    })();
+
+    this.uniswapV3PoolCache.set(key, task);
+    return task;
   }
 
   private async getBlockReceipts(

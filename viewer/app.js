@@ -43,9 +43,45 @@ const elements = {
   totalCandidates: document.querySelector("#totalCandidates")
 };
 
+const TOKEN_LABELS = new Map([
+  ["0x82af49447d8a07e3bd95bd0d56f35241523fbab1", "WETH"],
+  ["0xe50fa9b3c56ffb159cb0fca61f5c9d750e8128c8", "aArbWETH"],
+  ["0xaf88d065e77c8cc2239327c5edb3a432268e5831", "USDC"],
+  ["0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", "USDC.e"],
+  ["0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", "USDT"],
+  ["0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", "DAI"],
+  ["0x2f2a2543b76a4166549f7aaab2e75bef0eaefc5b", "WBTC"],
+  ["0x912ce59144191c1204e64559fe8253a0e49e6548", "ARB"],
+  ["0x5979d7b546e38e414f7e9822514be443a4800529", "wstETH"],
+  ["0x35751007a407ca6feffe80b3cb397736d2cf4dbe", "weETH"],
+  ["0xec70dc2877b6f5081d14c2d3d8cc1552d65be8dc", "rETH"],
+  ["0x17fc002b466eec40dae837fc4be5c67993ddbd6f", "FRAX"],
+  ["0xfa7f8980b0f1e64a2062791cc3b0871572f1f7f0", "UNI"],
+  ["0xfc5a1a6eb076a6c7c3e7c8b2fefafcce2eebd0a8", "GMX"]
+]);
+
 function formatAddress(value) {
   if (!value) return "-";
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function formatToken(value) {
+  if (!value) return "-";
+  const symbol = TOKEN_LABELS.get(value.toLowerCase());
+  if (!symbol) return formatAddress(value);
+  return `${symbol} · ${formatAddress(value)}`;
+}
+
+function formatTokenInline(value) {
+  if (!value) return "-";
+  const symbol = TOKEN_LABELS.get(value.toLowerCase());
+  return symbol ? `${symbol}(${value})` : value;
+}
+
+function formatEvidence(value) {
+  if (!value) return "-";
+
+  return value.replaceAll(/0x[a-fA-F0-9]{40}/g, (match) => formatTokenInline(match.toLowerCase()));
 }
 
 function formatNumber(value) {
@@ -177,7 +213,7 @@ function renderFlashLoan(item) {
   line.className = "stack-card";
   line.innerHTML = `
     <strong>${item.protocol}</strong>
-    <span>${formatAddress(item.asset)} · amount ${item.amountWei}</span>
+    <span>${formatToken(item.asset)} · amount ${item.amountWei}</span>
     <span>callback ${item.callback}</span>
     <span>receiver ${formatAddress(item.receiver)} · caller ${formatAddress(item.caller)}</span>
   `;
@@ -189,7 +225,8 @@ function renderPayout(item) {
   line.className = "stack-card";
   line.innerHTML = `
     <strong>${formatAddress(item.recipient)}</strong>
-    <span>token ${formatAddress(item.token)}</span>
+    <span>token ${formatToken(item.token)}</span>
+    <span>kind ${item.kind}</span>
     <span>net ${item.netAmountWei}</span>
   `;
   return line;
@@ -256,7 +293,7 @@ function renderCandidate(candidate) {
   } else {
     for (const evidence of candidate.evidence) {
       const li = document.createElement("li");
-      li.textContent = evidence;
+      li.textContent = formatEvidence(evidence);
       evidenceList.append(li);
     }
   }

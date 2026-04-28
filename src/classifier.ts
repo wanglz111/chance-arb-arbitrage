@@ -3,6 +3,8 @@ import type { LogDescription } from "ethers";
 import {
   AAVE_V3_POOL_ADDRESS,
   aavePoolInterface,
+  BALANCER_V2_VAULT_ADDRESS,
+  balancerVaultInterface,
   erc20Interface,
   erc4626LikeInterface,
   morphoInterface,
@@ -21,7 +23,8 @@ import type {
   MonitoredSharePair,
   RawLog,
   RawReceipt,
-  RawTransaction
+  RawTransaction,
+  UniswapV3PoolSnapshot
 } from "./types.js";
 import { hexToBigInt, hexToNumber, normalizeAddress } from "./utils.js";
 
@@ -52,6 +55,7 @@ type TransferSignal = {
 
 type PayoutSignal = {
   amount: bigint;
+  kind: "external-transfer" | "net-inflow";
   recipient: string;
   token: string;
 };
@@ -84,6 +88,7 @@ type AnalysisInput = {
   receipt: RawReceipt;
   timestamp: number;
   tx: RawTransaction;
+  uniswapV3PoolsByAddress: Map<string, UniswapV3PoolSnapshot>;
 };
 
 function decodeLog(interfaceInstance: { parseLog(log: RawLog): LogDescription | null }, log: RawLog): LogDescription | null {
@@ -137,6 +142,7 @@ function serializeFlashLoan(signal: FlashLoanSignal): CandidateFlashLoan {
 
 function serializePayout(signal: PayoutSignal): CandidatePayout {
   return {
+    kind: signal.kind,
     netAmountWei: signal.amount.toString(),
     recipient: signal.recipient,
     token: signal.token
@@ -266,6 +272,87 @@ function trackMorphoFlashLoan(state: AnalysisState, logAddress: string, log: Raw
   );
 }
 
+function trackBalancerFlashLoan(state: AnalysisState, logAddress: string, log: RawLog): void {
+  if (logAddress !== BALANCER_V2_VAULT_ADDRESS) {
+    return;
+  }
+
+  const parsed = decodeLog(balancerVaultInterface, log);
+  if (!parsed) return;
+
+  const recipient = normalizeAddress(String(parsed.args.recipient));
+  const asset = normalizeAddress(String(parsed.args.token));
+  const amount = parsed.args.amount as bigint;
+  const premium = parsed.args.feeAmount as bigint;
+  if (!recipient || !asset) return;
+
+  state.protocols.add("balancer-v2");
+  state.flashLoans.push({
+    amount,
+    asset,
+    callback: "receiveFlashLoan",
+    caller: null,
+    initiator: null,
+    premium,
+    protocol: "balancer-v2",
+    provider: logAddress,
+    receiver: recipient
+  });
+  pushEvidence(
+    state.evidence,
+    `balancer flash loan recipient=${recipient} asset=${asset} amount=${amount.toString()} premium=${premium.toString()}`
+  );
+}
+
+function trackUniswapV3Flash(state: AnalysisState, input: AnalysisInput, logAddress: string, log: RawLog): void {
+  const parsed = decodeLog(uniswapV3LikeInterface, log);
+  if (!parsed || parsed.name !== "Flash") return;
+
+  const poolSnapshot = input.uniswapV3PoolsByAddress.get(logAddress);
+  if (!poolSnapshot) return;
+
+  const caller = normalizeAddress(String(parsed.args.sender));
+  const recipient = normalizeAddress(String(parsed.args.recipient));
+  const amount0 = parsed.args.amount0 as bigint;
+  const amount1 = parsed.args.amount1 as bigint;
+  const paid0 = parsed.args.paid0 as bigint;
+  const paid1 = parsed.args.paid1 as bigint;
+
+  state.protocols.add("uniswap-v3");
+
+  const flashLegs = [
+    {
+      amount: amount0,
+      asset: poolSnapshot.token0,
+      premium: paid0 >= amount0 ? paid0 - amount0 : 0n
+    },
+    {
+      amount: amount1,
+      asset: poolSnapshot.token1,
+      premium: paid1 >= amount1 ? paid1 - amount1 : 0n
+    }
+  ];
+
+  for (const leg of flashLegs) {
+    if (leg.amount <= 0n) continue;
+    state.flashLoans.push({
+      amount: leg.amount,
+      asset: leg.asset,
+      callback: "uniswapV3FlashCallback",
+      caller,
+      initiator: null,
+      premium: leg.premium,
+      protocol: "uniswap-v3",
+      provider: logAddress,
+      receiver: recipient
+    });
+    pushEvidence(
+      state.evidence,
+      `uniswap v3 flash pool=${logAddress} caller=${caller ?? "unknown"} recipient=${recipient ?? "unknown"} asset=${leg.asset} amount=${leg.amount.toString()} premium=${leg.premium.toString()}`
+    );
+  }
+}
+
 function trackAaveLog(
   state: AnalysisState,
   monitoredReserves: Set<string>,
@@ -362,6 +449,7 @@ function trackAaveLog(
 }
 
 function analyzeLog(
+  input: AnalysisInput,
   state: AnalysisState,
   monitoredPairsByToken: Map<string, MonitoredSharePair>,
   monitoredReserves: Set<string>,
@@ -384,6 +472,11 @@ function analyzeLog(
     state.protocols.add("uniswap-v3-like");
     state.swapEventCount += 1;
     state.swapPools.add(logAddress);
+    return;
+  }
+
+  if (topic0 === TOPICS.uniswapV3Flash) {
+    trackUniswapV3Flash(state, input, logAddress, log);
     return;
   }
 
@@ -437,12 +530,23 @@ function analyzeLog(
     return;
   }
 
+  if (topic0 === TOPICS.balancerFlashLoan) {
+    trackBalancerFlashLoan(state, logAddress, log);
+    return;
+  }
+
   trackAaveLog(state, monitoredReserves, logAddress, log);
 }
 
 function finalizePayouts(input: AnalysisInput, state: AnalysisState): void {
+  const zeroAddress = "0x0000000000000000000000000000000000000000";
   const watchedAddresses = new Set<string>();
   const providerAddresses = new Set(state.flashLoans.map((signal) => signal.provider));
+  const logEmitterAddresses = new Set(
+    input.receipt.logs
+      .map((log) => normalizeAddress(log.address))
+      .filter((value): value is string => value !== null)
+  );
 
   const txCaller = normalizeAddress(input.tx.from);
   if (txCaller) watchedAddresses.add(txCaller);
@@ -460,25 +564,44 @@ function finalizePayouts(input: AnalysisInput, state: AnalysisState): void {
     watchedAddresses.delete(providerAddress);
   }
 
-  const netByRecipientAndToken = new Map<string, bigint>();
+  const netInflowByRecipientAndToken = new Map<string, bigint>();
+  const externalTransferByRecipientAndToken = new Map<string, bigint>();
   for (const transfer of state.erc20Transfers) {
     if (watchedAddresses.has(transfer.to)) {
       const key = `${transfer.to}:${transfer.token}`;
-      netByRecipientAndToken.set(key, (netByRecipientAndToken.get(key) ?? 0n) + transfer.value);
+      netInflowByRecipientAndToken.set(key, (netInflowByRecipientAndToken.get(key) ?? 0n) + transfer.value);
     }
 
     if (watchedAddresses.has(transfer.from)) {
       const key = `${transfer.from}:${transfer.token}`;
-      netByRecipientAndToken.set(key, (netByRecipientAndToken.get(key) ?? 0n) - transfer.value);
+      netInflowByRecipientAndToken.set(key, (netInflowByRecipientAndToken.get(key) ?? 0n) - transfer.value);
+    }
+
+    const isExternalRecipient = (
+      transfer.to !== zeroAddress
+      && !watchedAddresses.has(transfer.to)
+      && !providerAddresses.has(transfer.to)
+      && !logEmitterAddresses.has(transfer.to)
+    );
+    if (watchedAddresses.has(transfer.from) && isExternalRecipient) {
+      const key = `${transfer.to}:${transfer.token}`;
+      externalTransferByRecipientAndToken.set(key, (externalTransferByRecipientAndToken.get(key) ?? 0n) + transfer.value);
     }
   }
 
-  state.payouts = Array.from(netByRecipientAndToken.entries())
-    .filter(([, amount]) => amount > 0n)
-    .map(([key, amount]) => {
+  state.payouts = [
+    ...Array.from(netInflowByRecipientAndToken.entries())
+      .filter(([, amount]) => amount > 0n)
+      .map(([key, amount]) => ({ key, amount, kind: "net-inflow" as const })),
+    ...Array.from(externalTransferByRecipientAndToken.entries())
+      .filter(([, amount]) => amount > 0n)
+      .map(([key, amount]) => ({ key, amount, kind: "external-transfer" as const }))
+  ]
+    .map(({ key, amount, kind }) => {
       const separatorIndex = key.indexOf(":");
       return {
         amount,
+        kind,
         recipient: key.slice(0, separatorIndex),
         token: key.slice(separatorIndex + 1)
       };
@@ -493,7 +616,7 @@ function finalizePayouts(input: AnalysisInput, state: AnalysisState): void {
   for (const payout of state.payouts) {
     pushEvidence(
       state.evidence,
-      `payout recipient=${payout.recipient} token=${payout.token} net=${payout.amount.toString()}`
+      `payout recipient=${payout.recipient} token=${payout.token} net=${payout.amount.toString()} kind=${payout.kind}`
     );
   }
 }
@@ -544,6 +667,11 @@ function deriveTags(config: AppConfig, state: AnalysisState): { score: number; t
   if (state.flashLoans.length > 0 && (flashLoanAmount >= config.minFlashLoanWei || hasFlashLoanPathSignal)) {
     tags.push("flash-loan");
     score += 3;
+  }
+
+  if (state.payouts.length > 0) {
+    tags.push("payout");
+    score += 1;
   }
 
   if (state.swapPools.size >= config.minSwapPools) {
@@ -604,7 +732,7 @@ export function classifyTransaction(input: AnalysisInput): Candidate | null {
   }
 
   for (const log of input.receipt.logs) {
-    analyzeLog(state, monitoredPairsByToken, monitoredReserves, log);
+    analyzeLog(input, state, monitoredPairsByToken, monitoredReserves, log);
   }
 
   finalizePayouts(input, state);

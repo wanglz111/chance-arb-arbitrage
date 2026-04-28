@@ -2,6 +2,7 @@ import { Interface, id } from "ethers";
 
 export const ARBITRUM_CHAIN_NAME = "arbitrum";
 export const AAVE_V3_POOL_ADDRESS = "0x794a61358d6845594f94dc1db02a252b5b4814ad";
+export const BALANCER_V2_VAULT_ADDRESS = "0xba12222222228d8ba445958a75a0704d566bf2c8";
 export const WETH_ADDRESS = "0x82af49447d8a07e3bd95bd0d56f35241523fbab1";
 export const AARBWETH_ADDRESS = "0xe50fa9b3c56ffb159cb0fca61f5c9d750e8128c8";
 
@@ -18,11 +19,18 @@ export const morphoInterface = new Interface([
   "event FlashLoan(address indexed caller,address indexed token,uint256 assets)"
 ]);
 
+export const balancerVaultInterface = new Interface([
+  "event FlashLoan(address indexed recipient,address indexed token,uint256 amount,uint256 feeAmount)"
+]);
+
 export const uniswapV2LikeInterface = new Interface([
   "event Swap(address indexed sender,uint256 amount0In,uint256 amount1In,uint256 amount0Out,uint256 amount1Out,address indexed to)"
 ]);
 
 export const uniswapV3LikeInterface = new Interface([
+  "function token0() view returns (address)",
+  "function token1() view returns (address)",
+  "event Flash(address indexed sender,address indexed recipient,uint256 amount0,uint256 amount1,uint256 paid0,uint256 paid1)",
   "event Swap(address indexed sender,address indexed recipient,int256 amount0,int256 amount1,uint160 sqrtPriceX96,uint128 liquidity,int24 tick)"
 ]);
 
@@ -47,10 +55,12 @@ export const TOPICS = {
   aaveRepay: id("Repay(address,address,address,uint256,bool)").toLowerCase(),
   aaveSupply: id("Supply(address,address,address,uint256,uint16)").toLowerCase(),
   aaveWithdraw: id("Withdraw(address,address,address,uint256)").toLowerCase(),
+  balancerFlashLoan: id("FlashLoan(address,address,uint256,uint256)").toLowerCase(),
   erc20Transfer: id("Transfer(address,address,uint256)").toLowerCase(),
   erc4626Deposit: id("Deposit(address,address,uint256,uint256)").toLowerCase(),
   erc4626Withdraw: id("Withdraw(address,address,address,uint256,uint256)").toLowerCase(),
   morphoFlashLoan: id("FlashLoan(address,address,uint256)").toLowerCase(),
+  uniswapV3Flash: id("Flash(address,address,uint256,uint256,uint256,uint256)").toLowerCase(),
   uniswapV2Swap: id("Swap(address,uint256,uint256,uint256,uint256,address)").toLowerCase(),
   uniswapV3Swap: id("Swap(address,address,int256,int256,uint160,uint128,int24)").toLowerCase(),
   wethDeposit: id("Deposit(address,uint256)").toLowerCase(),

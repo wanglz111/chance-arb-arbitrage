@@ -2,12 +2,13 @@ import type { Log, WebSocketLike } from "ethers";
 import { WebSocketProvider } from "ethers";
 
 import { classifyTransaction } from "./classifier.js";
-import { AAVE_V3_POOL_ADDRESS, TOPICS } from "./constants.js";
+import { CheckpointStore } from "./checkpoint.js";
+import { AAVE_V3_POOL_ADDRESS, BALANCER_V2_VAULT_ADDRESS, TOPICS } from "./constants.js";
 import { ChainFetcher } from "./fetcher.js";
 import { logError, logInfo, logWarn } from "./logger.js";
 import { CandidateReporter } from "./reporter.js";
-import type { AppConfig, Candidate } from "./types.js";
-import { mapWithConcurrency, shortHash, sleep } from "./utils.js";
+import type { AppConfig, BackfillMode, Candidate, RawReceipt, UniswapV3PoolSnapshot } from "./types.js";
+import { mapWithConcurrency, normalizeAddress, shortHash, sleep } from "./utils.js";
 
 type ManagedWebSocket = WebSocketLike & {
   onclose?: null | ((event: { code?: number; reason?: string } | unknown) => unknown);
@@ -22,6 +23,7 @@ type FlashLoanSignalSubscription = {
 };
 
 export class CandidateDiscoveryService {
+  private readonly checkpoints: CheckpointStore;
   private readonly fetcher: ChainFetcher;
   private readonly reporter: CandidateReporter;
   private readonly seenSignalTxs = new Map<string, number>();
@@ -30,6 +32,7 @@ export class CandidateDiscoveryService {
   private wsProvider: WebSocketProvider | null = null;
 
   constructor(private readonly config: AppConfig) {
+    this.checkpoints = new CheckpointStore(config.checkpointPath);
     this.fetcher = new ChainFetcher(config.rpcUrl, config.maxConcurrentTransactions);
     this.reporter = new CandidateReporter(config.outputPath);
   }
@@ -63,12 +66,14 @@ export class CandidateDiscoveryService {
 
     const blockNumber = Number.parseInt(receipt.blockNumber, 16);
     const timestamp = await this.fetcher.getBlockTimestamp(blockNumber) ?? Math.floor(Date.now() / 1000);
+    const uniswapV3PoolsByAddress = await this.buildUniswapV3PoolSnapshotMap(receipt);
 
     return classifyTransaction({
       config: this.config,
       receipt,
       timestamp,
-      tx
+      tx,
+      uniswapV3PoolsByAddress
     });
   }
 
@@ -86,21 +91,26 @@ export class CandidateDiscoveryService {
       async (tx) => {
         const receipt = bundle.receiptsByHash.get(tx.hash.toLowerCase());
         if (!receipt) return null;
+        const uniswapV3PoolsByAddress = await this.buildUniswapV3PoolSnapshotMap(receipt);
 
         return classifyTransaction({
           config: this.config,
           receipt,
           timestamp,
-          tx
+          tx,
+          uniswapV3PoolsByAddress
         });
       }
     );
 
     const filtered = candidates.filter((candidate): candidate is Candidate => candidate !== null);
+    let reportedCount = 0;
     for (const candidate of filtered) {
-      this.reporter.reportCandidate(candidate);
+      if (this.reporter.reportCandidate(candidate)) {
+        reportedCount += 1;
+      }
     }
-    this.reporter.reportBlockSummary(blockNumber, bundle.block.transactions.length, filtered.length);
+    this.reporter.reportBlockSummary(blockNumber, bundle.block.transactions.length, reportedCount);
     return filtered;
   }
 
@@ -110,11 +120,27 @@ export class CandidateDiscoveryService {
     }
   }
 
+  public async backfillRange(fromBlock: number, toBlock: number, mode: BackfillMode, resume: boolean): Promise<void> {
+    if (mode === "logs") {
+      await this.backfillRangeByLogs(fromBlock, toBlock, resume);
+      return;
+    }
+
+    await this.backfillRangeByBlocks(fromBlock, toBlock, resume);
+  }
+
   public async runLive(): Promise<void> {
     let nextBlock = this.config.startBlock;
+    const checkpointBlock = this.checkpoints.getBlockPollNextBlock();
+
+    if (checkpointBlock !== null) {
+      nextBlock = nextBlock === null ? checkpointBlock : Math.max(nextBlock, checkpointBlock);
+    }
+
     if (nextBlock === null) {
       const latest = await this.fetcher.getLatestBlockNumber();
       nextBlock = Math.max(0, latest - this.config.finalityConfirmations);
+      this.checkpoints.setBlockPollNextBlock(nextBlock);
     }
 
     logInfo(
@@ -128,6 +154,7 @@ export class CandidateDiscoveryService {
       while (nextBlock <= targetBlock) {
         await this.scanBlock(nextBlock);
         nextBlock += 1;
+        this.checkpoints.setBlockPollNextBlock(nextBlock);
       }
 
       await sleep(this.config.pollIntervalMs);
@@ -162,6 +189,14 @@ export class CandidateDiscoveryService {
         });
 
         await provider.getNetwork();
+        await this.catchUpFlashLoanSignals();
+
+        provider.on("block", (blockNumber) => {
+          const syncedBlock = blockNumber - this.config.finalityConfirmations;
+          if (syncedBlock >= 0) {
+            this.checkpoints.setWsSyncedBlock(syncedBlock);
+          }
+        });
 
         for (const subscription of subscriptions) {
           provider.on(subscription.filter, (log) => {
@@ -197,11 +232,147 @@ export class CandidateDiscoveryService {
       },
       {
         filter: {
+          address: BALANCER_V2_VAULT_ADDRESS,
+          topics: [TOPICS.balancerFlashLoan]
+        },
+        label: "balancer-v2-flash-loan"
+      },
+      {
+        filter: {
           topics: [TOPICS.morphoFlashLoan]
         },
         label: "morpho-flash-loan"
+      },
+      {
+        filter: {
+          topics: [TOPICS.uniswapV3Flash]
+        },
+        label: "uniswap-v3-flash"
       }
     ];
+  }
+
+  private async buildUniswapV3PoolSnapshotMap(receipt: RawReceipt): Promise<Map<string, UniswapV3PoolSnapshot>> {
+    const poolAddresses = Array.from(new Set(
+      receipt.logs
+        .filter((log) => log.topics[0]?.toLowerCase() === TOPICS.uniswapV3Flash)
+        .map((log) => normalizeAddress(log.address))
+        .filter((value): value is string => value !== null)
+    ));
+
+    const snapshots = await Promise.all(poolAddresses.map(async (poolAddress) => (
+      [poolAddress, await this.fetcher.getUniswapV3PoolSnapshot(poolAddress)] as const
+    )));
+
+    return new Map(
+      snapshots.filter((entry): entry is readonly [string, UniswapV3PoolSnapshot] => entry[1] !== null)
+    );
+  }
+
+  private async backfillRangeByBlocks(fromBlock: number, toBlock: number, resume: boolean): Promise<void> {
+    const checkpointKey = this.buildBackfillCheckpointKey("blocks", fromBlock, toBlock);
+    let nextBlock = fromBlock;
+    const existing = this.checkpoints.getBackfillCursor(checkpointKey);
+
+    if (resume && existing) {
+      nextBlock = Math.max(fromBlock, existing.nextBlock);
+    }
+
+    for (let blockNumber = nextBlock; blockNumber <= toBlock; blockNumber += 1) {
+      await this.scanBlock(blockNumber);
+      this.checkpoints.setBackfillCursor(checkpointKey, {
+        fromBlock,
+        mode: "blocks",
+        nextBlock: blockNumber + 1,
+        toBlock
+      });
+    }
+
+    this.checkpoints.clearBackfillCursor(checkpointKey);
+  }
+
+  private async backfillRangeByLogs(fromBlock: number, toBlock: number, resume: boolean): Promise<void> {
+    const checkpointKey = this.buildBackfillCheckpointKey("logs", fromBlock, toBlock);
+    let nextBlock = fromBlock;
+    const existing = this.checkpoints.getBackfillCursor(checkpointKey);
+
+    if (resume && existing) {
+      nextBlock = Math.max(fromBlock, existing.nextBlock);
+    }
+
+    while (nextBlock <= toBlock) {
+      const endBlock = Math.min(toBlock, nextBlock + this.config.logBackfillBlockSpan - 1);
+      const txHashes = await this.findFlashLoanSignalTransactionHashes(nextBlock, endBlock);
+      const candidates = await mapWithConcurrency(
+        txHashes,
+        this.config.maxConcurrentTransactions,
+        async (txHash) => this.analyzeTransactionHash(txHash)
+      );
+
+      let reportedCount = 0;
+      for (const candidate of candidates) {
+        if (candidate && this.reporter.reportCandidate(candidate)) {
+          reportedCount += 1;
+        }
+      }
+
+      logInfo(
+        `[backfill-logs] from=${nextBlock} to=${endBlock} signalTxs=${txHashes.length} candidates=${reportedCount}`
+      );
+
+      this.checkpoints.setBackfillCursor(checkpointKey, {
+        fromBlock,
+        mode: "logs",
+        nextBlock: endBlock + 1,
+        toBlock
+      });
+      nextBlock = endBlock + 1;
+    }
+
+    this.checkpoints.clearBackfillCursor(checkpointKey);
+  }
+
+  private async catchUpFlashLoanSignals(): Promise<void> {
+    const latest = await this.fetcher.getLatestBlockNumber();
+    const targetBlock = Math.max(0, latest - this.config.finalityConfirmations);
+    const lastSyncedBlock = this.checkpoints.getWsSyncedBlock();
+
+    if (lastSyncedBlock === null) {
+      this.checkpoints.setWsSyncedBlock(targetBlock);
+      return;
+    }
+
+    const fromBlock = lastSyncedBlock + 1;
+    if (fromBlock > targetBlock) {
+      return;
+    }
+
+    logInfo(`[ws-catchup] from=${fromBlock} to=${targetBlock}`);
+    await this.backfillRangeByLogs(fromBlock, targetBlock, false);
+    this.checkpoints.setWsSyncedBlock(targetBlock);
+  }
+
+  private async findFlashLoanSignalTransactionHashes(fromBlock: number, toBlock: number): Promise<string[]> {
+    const subscriptions = this.getFlashLoanSignalSubscriptions();
+    const logsPerSource = await Promise.all(subscriptions.map((subscription) => (
+      this.fetcher.getLogs({
+        address: subscription.filter.address,
+        fromBlock,
+        toBlock,
+        topics: subscription.filter.topics
+      })
+    )));
+
+    return Array.from(new Set(
+      logsPerSource
+        .flat()
+        .map((log) => log.transactionHash?.toLowerCase())
+        .filter((value): value is string => Boolean(value))
+    ));
+  }
+
+  private buildBackfillCheckpointKey(mode: BackfillMode, fromBlock: number, toBlock: number): string {
+    return `${mode}:${fromBlock}:${toBlock}`;
   }
 
   private async handleFlashLoanSignal(source: string, log: Log): Promise<void> {

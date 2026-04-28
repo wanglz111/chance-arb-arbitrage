@@ -1,8 +1,11 @@
 import { loadConfig } from "../src/config.js";
 import { CandidateDiscoveryService } from "../src/service.js";
+import type { BackfillMode } from "../src/types.js";
 
 type Args = {
   from: number;
+  mode: BackfillMode;
+  resume: boolean;
   to: number;
 };
 
@@ -20,6 +23,8 @@ function parseInteger(value: string | undefined, name: string): number {
 
 function parseArgs(argv: string[]): Args {
   let from: number | null = null;
+  let mode: BackfillMode = "logs";
+  let resume = false;
   let to: number | null = null;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -34,17 +39,30 @@ function parseArgs(argv: string[]): Args {
       index += 1;
       continue;
     }
+    if (arg === "--mode") {
+      const value = argv[index + 1];
+      if (value !== "blocks" && value !== "logs") {
+        throw new Error(`Invalid --mode: ${value}`);
+      }
+      mode = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--resume") {
+      resume = true;
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
 
   if (from === null || to === null) {
-    throw new Error("Usage: npm run backfill -- --from <block> --to <block>");
+    throw new Error("Usage: npm run backfill -- --from <block> --to <block> [--mode logs|blocks] [--resume]");
   }
   if (to < from) {
     throw new Error("--to must be greater than or equal to --from");
   }
 
-  return { from, to };
+  return { from, mode, resume, to };
 }
 
 async function main(): Promise<void> {
@@ -53,7 +71,7 @@ async function main(): Promise<void> {
   const service = new CandidateDiscoveryService(config);
 
   try {
-    await service.scanRange(args.from, args.to);
+    await service.backfillRange(args.from, args.to, args.mode, args.resume);
   } finally {
     await service.destroy();
   }
