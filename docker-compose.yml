@@ -1,8 +1,7 @@
 services:
   scanner:
-    build:
-      context: .
-    image: ${CHANCE_ARB_IMAGE:-chance-arb-arbitrage:local}
+    image: ${CHANCE_ARB_IMAGE:-ghcr.io/wanglz111/chance-arb-arbitrage:latest}
+    pull_policy: always
     container_name: chance-arb-scanner
     restart: unless-stopped
     env_file:
@@ -13,11 +12,12 @@ services:
     command: ["node", "dist/src/index.js"]
     volumes:
       - ./data:/app/data
+    networks:
+      - default
 
   viewer:
-    build:
-      context: .
-    image: ${CHANCE_ARB_IMAGE:-chance-arb-arbitrage:local}
+    image: ${CHANCE_ARB_IMAGE:-ghcr.io/wanglz111/chance-arb-arbitrage:latest}
+    pull_policy: always
     container_name: chance-arb-viewer
     restart: unless-stopped
     env_file:
@@ -27,7 +27,12 @@ services:
       VIEWER_HOST: 0.0.0.0
       VIEWER_PORT: 4310
     command: ["node", "dist/scripts/view-candidates.js"]
-    ports:
-      - "4310:4310"
     volumes:
       - ./data:/app/data:ro
+    networks:
+      - default
+      - monitor_net
+
+networks:
+  monitor_net:
+    external: true

@@ -55,16 +55,41 @@ OUTPUT_PATH=/app/data/candidates.jsonl
 CHECKPOINT_PATH=/app/data/checkpoints.json
 ```
 
+默认 compose 会直接拉：
+
+```text
+ghcr.io/wanglz111/chance-arb-arbitrage:latest
+```
+
 启动：
 
 ```bash
+docker login ghcr.io
+docker compose pull
 docker compose up -d scanner viewer
 ```
 
-如果你要直接拉 GitHub Actions 推出来的镜像，而不是在服务器本地 build，先设：
+如果你想切到指定 tag 或 sha，改一个环境变量就行：
 
 ```bash
-export CHANCE_ARB_IMAGE=ghcr.io/<owner>/<repo>:latest
+export CHANCE_ARB_IMAGE=ghcr.io/wanglz111/chance-arb-arbitrage:latest
+docker compose pull
+docker compose up -d scanner viewer
+```
+
+例如固定到某个版本：
+
+```bash
+export CHANCE_ARB_IMAGE=ghcr.io/wanglz111/chance-arb-arbitrage:v0.1.0
+docker compose pull
+docker compose up -d scanner viewer
+```
+
+例如固定到某个 commit sha tag：
+
+```bash
+export CHANCE_ARB_IMAGE=ghcr.io/wanglz111/chance-arb-arbitrage:sha-63cb577
+docker compose pull
 docker compose up -d scanner viewer
 ```
 
@@ -120,16 +145,10 @@ docker compose restart scanner
 docker compose down
 ```
 
-如果你改了本地代码并准备在服务器本地重新 build：
-
-```bash
-docker compose up -d --build scanner viewer
-```
-
 如果你使用 GitHub Actions 推到 GHCR 的镜像更新：
 
 ```bash
-export CHANCE_ARB_IMAGE=ghcr.io/<owner>/<repo>:latest
+export CHANCE_ARB_IMAGE=ghcr.io/wanglz111/chance-arb-arbitrage:latest
 docker compose pull
 docker compose up -d
 ```
