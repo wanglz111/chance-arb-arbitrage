@@ -1,0 +1,33 @@
+services:
+  scanner:
+    build:
+      context: .
+    image: ${CHANCE_ARB_IMAGE:-chance-arb-arbitrage:local}
+    container_name: chance-arb-scanner
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      OUTPUT_PATH: /app/data/candidates.jsonl
+      CHECKPOINT_PATH: /app/data/checkpoints.json
+    command: ["node", "dist/src/index.js"]
+    volumes:
+      - ./data:/app/data
+
+  viewer:
+    build:
+      context: .
+    image: ${CHANCE_ARB_IMAGE:-chance-arb-arbitrage:local}
+    container_name: chance-arb-viewer
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CANDIDATES_PATH: /app/data/candidates.jsonl
+      VIEWER_HOST: 0.0.0.0
+      VIEWER_PORT: 4310
+    command: ["node", "dist/scripts/view-candidates.js"]
+    ports:
+      - "4310:4310"
+    volumes:
+      - ./data:/app/data:ro

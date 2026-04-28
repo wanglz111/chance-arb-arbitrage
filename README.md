@@ -36,6 +36,111 @@ cp .env.example .env
 RPC_URL=https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
 ```
 
+## Docker
+
+本项目现在可以直接以 Docker / Docker Compose 方式部署。
+
+先准备 `.env`：
+
+```bash
+cp .env.example .env
+```
+
+如果你准备长期监听新事件，通常至少改这几项：
+
+```env
+LIVE_MODE=ws-flashloan
+WS_RPC_URL=wss://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
+OUTPUT_PATH=/app/data/candidates.jsonl
+CHECKPOINT_PATH=/app/data/checkpoints.json
+```
+
+启动：
+
+```bash
+docker compose up -d scanner viewer
+```
+
+如果你要直接拉 GitHub Actions 推出来的镜像，而不是在服务器本地 build，先设：
+
+```bash
+export CHANCE_ARB_IMAGE=ghcr.io/<owner>/<repo>:latest
+docker compose up -d scanner viewer
+```
+
+说明：
+
+- `scanner`：长期运行的候选发现进程
+- `viewer`：读取同一份 `./data/candidates.jsonl`，开放 `4310` 端口
+- 宿主机 `./data` 会映射到容器里的 `/app/data`
+
+如果你只想跑扫描器：
+
+```bash
+docker compose up -d scanner
+```
+
+如果你要做一次性历史回扫：
+
+```bash
+docker compose run --rm scanner node dist/scripts/backfill-block-range.js --from 320000000 --to 320000050 --mode logs
+```
+
+## 服务器运维
+
+如果你准备把它长期放在服务器 Docker 里跑，最常用的方法就是下面这几种。
+
+查看服务状态：
+
+```bash
+docker compose ps
+```
+
+查看扫描器日志：
+
+```bash
+docker compose logs -f scanner
+```
+
+查看 viewer 日志：
+
+```bash
+docker compose logs -f viewer
+```
+
+重启扫描器：
+
+```bash
+docker compose restart scanner
+```
+
+停止所有服务：
+
+```bash
+docker compose down
+```
+
+如果你改了本地代码并准备在服务器本地重新 build：
+
+```bash
+docker compose up -d --build scanner viewer
+```
+
+如果你使用 GitHub Actions 推到 GHCR 的镜像更新：
+
+```bash
+export CHANCE_ARB_IMAGE=ghcr.io/<owner>/<repo>:latest
+docker compose pull
+docker compose up -d
+```
+
+如果你只想更新扫描器：
+
+```bash
+docker compose pull scanner
+docker compose up -d scanner
+```
+
 ## 启动实时扫描
 
 ```bash
@@ -138,6 +243,52 @@ npm run backfill -- --from 320000000 --to 320000050 --mode logs --resume
 - 如果你的 RPC 对 `eth_getLogs` block range 限得很紧，把 `LOG_BACKFILL_BLOCK_SPAN` 设小一点，例如 `10`
 - `OUTPUT_PATH` 继续用 `jsonl` 没问题，研究期足够顺手
 - `CHECKPOINT_PATH` 建议单独放在 `./data/checkpoints.json`
+
+## 监控与取数
+
+如果你放在服务器的 Docker 里跑，最直接的监控方式有三种：
+
+- 看扫描器日志：
+
+```bash
+docker compose logs -f scanner
+```
+
+- 打开 viewer：
+
+```text
+http://<server-ip>:4310
+```
+
+- 直接看宿主机上的结果文件：
+
+```bash
+tail -f ./data/candidates.jsonl
+cat ./data/checkpoints.json
+```
+
+因为 `./data` 是挂载卷，所以你不需要特地从容器里导出数据：
+
+- 候选结果：`./data/candidates.jsonl`
+- 运行进度：`./data/checkpoints.json`
+
+如果你后面要把数据送到别的地方，最简单的做法是：
+
+- 用 `tail -F ./data/candidates.jsonl` 做流式消费
+- 定时把 `./data/candidates.jsonl` 同步到对象存储
+- 或者下一步直接把 writer 升级成 SQLite / Postgres
+
+如果你只是想把结果拿出来做离线分析，最简单的是：
+
+```bash
+cp ./data/candidates.jsonl ./candidates-$(date +%F-%H%M%S).jsonl
+```
+
+如果你想从容器内部直接读文件，也可以：
+
+```bash
+docker compose exec scanner sh -lc 'ls -lah /app/data && tail -n 20 /app/data/candidates.jsonl'
+```
 
 后续如果你要继续扩，我建议先补：
 
