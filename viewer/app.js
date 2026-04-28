@@ -82,6 +82,8 @@ function formatUpdatedAt(value) {
 }
 
 function setSelectOptions(select, items, fallbackLabel) {
+  if (!select) return;
+
   const previous = select.value;
   select.innerHTML = "";
 
@@ -130,9 +132,9 @@ function syncFiltersFromForm() {
   state.filters.limit = Number.parseInt(elements.limitSelect.value, 10);
   state.filters.flashLoanOnly = elements.flashLoanOnly.checked;
   state.filters.payoutOnly = elements.payoutOnly.checked;
-  state.filters.minScore = elements.scoreSevenNewest.checked ? 7 : 0;
+  state.filters.minScore = elements.scoreSevenNewest?.checked ? 7 : 0;
 
-  if (elements.scoreSevenNewest.checked) {
+  if (elements.scoreSevenNewest?.checked) {
     state.filters.sort = "newest";
     elements.sortSelect.value = "newest";
   }
