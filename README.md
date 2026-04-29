@@ -97,13 +97,40 @@ docker compose up -d scanner viewer
 说明：
 
 - `scanner`：长期运行的候选发现进程
-- `viewer`：读取同一份 `./data/candidates.jsonl`，开放 `4310` 端口
+- `viewer`：读取 `./data/candidates-YYYY-MM-DD.jsonl`，开放 `4310` 端口，并支持按 UTC 日期切换
+- `uploader`：每天 UTC 00:00 把前一天的 `./data/candidates-YYYY-MM-DD.jsonl` 上传到 Cloudflare R2
 - 宿主机 `./data` 会映射到容器里的 `/app/data`
 
 如果你只想跑扫描器：
 
 ```bash
 docker compose up -d scanner
+```
+
+如果你要自动上传到 Cloudflare R2，先在 `.env` 里补：
+
+```env
+R2_ACCOUNT_ID=your_cloudflare_account_id
+R2_BUCKET=your_bucket
+R2_ACCESS_KEY_ID=your_r2_access_key_id
+R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
+R2_KEY_PREFIX=chance-arb/candidates
+R2_LATEST_KEY=chance-arb/candidates/latest.jsonl
+R2_UPLOAD_RETRY_SECONDS=300
+```
+
+然后启动上传器：
+
+```bash
+docker compose up -d uploader
+```
+
+上传器会等到每天 UTC 00:00，把前一天的文件上传到 `R2_KEY_PREFIX` 下面，例如 `chance-arb/candidates/candidates-2026-04-29.jsonl`；如果配置了 `R2_LATEST_KEY`，还会额外覆盖一份固定路径的最新快照。
+
+如果你要手动补传某一天：
+
+```bash
+docker compose run --rm uploader node dist/scripts/upload-candidates-r2.js --date 2026-04-29
 ```
 
 如果你要做一次性历史回扫：
@@ -198,24 +225,26 @@ npm run analyze:tx -- 0xYOUR_TX_HASH
 npm run view:candidates
 ```
 
-默认会读取 `./data/candidates.jsonl`，并在本地打开一个 viewer：
+默认会读取 `./data/candidates-YYYY-MM-DD.jsonl`，并在本地打开一个 viewer：
 
 - 总览统计：总样本、flash loan 数、payout 数、平均分
-- 筛选：`tag / protocol / route hint / flash loan only / payout only / search`
+- 筛选：`UTC day / tag / protocol / route hint / flash loan only / payout only / search`
 - 详情：`flashLoans / payouts / evidence / raw json`
 
-如果你想看别的文件：
+如果你想换路径模板：
 
 ```bash
 npm run view:candidates -- ./data/candidates.jsonl
 ```
+
+viewer 会把这个路径当成模板，自动扫描同目录下的 `candidates-YYYY-MM-DD.jsonl`，页面里可以按 UTC 日期选择。
 
 ## 分析 24 小时候选路径
 
 扫描跑满一天后，可以直接把 `jsonl` 喂给离线分析脚本：
 
 ```bash
-npm run analyze:candidates -- ./data/candidates.jsonl --since-hours 24 --min-score 6 --top 20
+npm run analyze:candidates -- ./data/candidates-2026-04-29.jsonl --since-hours 24 --min-score 6 --top 20
 ```
 
 它会在终端输出摘要，并默认写出结构化报告：
@@ -300,16 +329,18 @@ npm run backfill -- --from 320000000 --to 320000050 --mode logs --resume
 运行时主要会写两类文件：
 
 - `OUTPUT_PATH`
-  默认 `./data/candidates.jsonl`
+  默认 `./data/candidates.jsonl`，实际会按 UTC 日期写成 `./data/candidates-YYYY-MM-DD.jsonl`
 - `CHECKPOINT_PATH`
   默认 `./data/checkpoints.json`
+- `R2_*`
+  Cloudflare R2 上传配置。`R2_KEY_PREFIX` 控制上传到 bucket 里的哪个路径前缀，`R2_LATEST_KEY` 控制是否额外维护一份固定路径的最新快照；上传器按 UTC 日切分，每天 UTC 00:00 上传前一天。
 
 为了方便人工和 AI 阅读，仓库里附带了两份静态样例：
 
 - [examples/candidates.sample.jsonl](/Users/edy/lucas/chance-arb-arbitrage/examples/candidates.sample.jsonl:1)
 - [examples/checkpoints.sample.json](/Users/edy/lucas/chance-arb-arbitrage/examples/checkpoints.sample.json:1)
 
-### `candidates.jsonl`
+### `candidates-YYYY-MM-DD.jsonl`
 
 - 文件格式：`JSONL`
 - 一行一条 `Candidate`
@@ -455,31 +486,31 @@ http://<server-ip>:4310
 - 直接看宿主机上的结果文件：
 
 ```bash
-tail -f ./data/candidates.jsonl
+tail -f ./data/candidates-$(date -u +%F).jsonl
 cat ./data/checkpoints.json
 ```
 
 因为 `./data` 是挂载卷，所以你不需要特地从容器里导出数据：
 
-- 候选结果：`./data/candidates.jsonl`
+- 候选结果：`./data/candidates-YYYY-MM-DD.jsonl`
 - 运行进度：`./data/checkpoints.json`
 
 如果你后面要把数据送到别的地方，最简单的做法是：
 
-- 用 `tail -F ./data/candidates.jsonl` 做流式消费
-- 定时把 `./data/candidates.jsonl` 同步到对象存储
+- 用 `tail -F ./data/candidates-$(date -u +%F).jsonl` 做流式消费
+- 定时把 `./data/candidates-YYYY-MM-DD.jsonl` 同步到对象存储
 - 或者下一步直接把 writer 升级成 SQLite / Postgres
 
 如果你只是想把结果拿出来做离线分析，最简单的是：
 
 ```bash
-cp ./data/candidates.jsonl ./candidates-$(date +%F-%H%M%S).jsonl
+cp ./data/candidates-$(date -u +%F).jsonl ./candidates-$(date -u +%F-%H%M%S).jsonl
 ```
 
 如果你想从容器内部直接读文件，也可以：
 
 ```bash
-docker compose exec scanner sh -lc 'ls -lah /app/data && tail -n 20 /app/data/candidates.jsonl'
+docker compose exec scanner sh -lc 'ls -lah /app/data && tail -n 20 /app/data/candidates-$(date -u +%F).jsonl'
 ```
 
 后续如果你要继续扩，我建议先补：
