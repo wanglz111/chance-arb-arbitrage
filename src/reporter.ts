@@ -7,6 +7,7 @@ import { shortHash } from "./utils.js";
 
 export class CandidateReporter {
   private readonly seenTxHashes = new Set<string>();
+  private currentOutputPath: string | null = null;
 
   constructor(private readonly outputPath: string) {
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -19,7 +20,14 @@ export class CandidateReporter {
       return false;
     }
 
-    fs.appendFileSync(this.outputPath, `${JSON.stringify(candidate)}\n`);
+    const targetPath = this.outputPathForCandidate(candidate);
+    if (targetPath !== this.currentOutputPath) {
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      this.currentOutputPath = targetPath;
+      logInfo(`[candidate] output=${targetPath}`);
+    }
+
+    fs.appendFileSync(targetPath, `${JSON.stringify(candidate)}\n`);
     this.seenTxHashes.add(txHash);
     logInfo(
       `[candidate] block=${candidate.blockNumber} tx=${shortHash(candidate.txHash)} score=${candidate.score} tags=${candidate.tags.join(",")} ${candidate.summary}`
@@ -32,8 +40,16 @@ export class CandidateReporter {
   }
 
   private loadExistingCandidates(): void {
+    const candidateFiles = this.existingCandidateFiles();
+
+    for (const candidateFile of candidateFiles) {
+      this.loadCandidateFile(candidateFile);
+    }
+  }
+
+  private loadCandidateFile(candidateFile: string): void {
     try {
-      const raw = fs.readFileSync(this.outputPath, "utf8");
+      const raw = fs.readFileSync(candidateFile, "utf8");
       for (const line of raw.split(/\r?\n/)) {
         const trimmed = line.trim();
         if (!trimmed) continue;
@@ -50,4 +66,38 @@ export class CandidateReporter {
       return;
     }
   }
+
+  private existingCandidateFiles(): string[] {
+    const directory = path.dirname(this.outputPath);
+    const baseName = path.basename(this.outputPath);
+    const parsed = path.parse(baseName);
+    const datedPattern = new RegExp(`^${escapeRegExp(parsed.name)}-\\d{4}-\\d{2}-\\d{2}${escapeRegExp(parsed.ext)}$`);
+    const files = new Set<string>();
+
+    try {
+      for (const entry of fs.readdirSync(directory)) {
+        if (datedPattern.test(entry)) {
+          files.add(path.join(directory, entry));
+        }
+      }
+    } catch {
+      return Array.from(files);
+    }
+
+    return Array.from(files);
+  }
+
+  private outputPathForCandidate(candidate: Candidate): string {
+    const parsed = path.parse(this.outputPath);
+    const day = utcDateString(candidate.timestamp);
+    return path.join(parsed.dir, `${parsed.name}-${day}${parsed.ext}`);
+  }
+}
+
+function utcDateString(timestampSeconds: number): string {
+  return new Date(timestampSeconds * 1000).toISOString().slice(0, 10);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
