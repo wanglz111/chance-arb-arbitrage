@@ -268,6 +268,12 @@ npm run analyze:candidates -- ./data/candidates-2026-04-29.jsonl --since-hours 2
 npm run analyze:candidates -- ./data/candidates-24h.jsonl --since-hours 24 --min-score 6 --report ./data/report-24h.json
 ```
 
+也可以直接分析 HTTP(S) 上的 `jsonl`：
+
+```bash
+npm run analyze:candidates -- https://arb-chance.gleaftex.com/candidates/candidates-2026-04-28.jsonl --min-score 6 --top 20 --report ./data/report-2026-04-28.json
+```
+
 如果你是把服务器上的 24 小时结果拷到本地，例如 `./data/candidates-24h.jsonl`：
 
 ```bash

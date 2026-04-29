@@ -80,6 +80,10 @@ function parseInteger(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function isHttpUrl(value: string): boolean {
+  return value.startsWith("http://") || value.startsWith("https://");
+}
+
 function parseArgs(argv: string[]): ParsedArgs {
   let inputPath = "./data/candidates.jsonl";
   let minScore = 0;
@@ -119,7 +123,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   return {
-    inputPath: path.resolve(process.cwd(), inputPath),
+    inputPath: isHttpUrl(inputPath) ? inputPath : path.resolve(process.cwd(), inputPath),
     minScore,
     reportPath: path.resolve(process.cwd(), reportPath),
     sinceHours,
@@ -128,16 +132,30 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function printUsage(): void {
-  console.log(`Usage: npm run analyze:candidates -- [path] [--since-hours 24] [--min-score 7] [--top 20] [--report path]
+  console.log(`Usage: npm run analyze:candidates -- [path-or-url] [--since-hours 24] [--min-score 7] [--top 20] [--report path]
 
 Examples:
   npm run analyze:candidates
   npm run analyze:candidates -- ./data/candidates-24h.jsonl --since-hours 24 --min-score 6 --report ./data/report-24h.json
+  npm run analyze:candidates -- https://arb-chance.gleaftex.com/candidates/candidates-2026-04-28.jsonl --min-score 6
 `);
 }
 
-function loadCandidates(inputPath: string): LoadedCandidates {
-  const raw = fs.readFileSync(inputPath, "utf8");
+async function readCandidateInput(inputPath: string): Promise<string> {
+  if (!isHttpUrl(inputPath)) {
+    return fs.readFileSync(inputPath, "utf8");
+  }
+
+  const response = await fetch(inputPath);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${inputPath}: HTTP ${response.status} ${response.statusText}`);
+  }
+
+  return response.text();
+}
+
+async function loadCandidates(inputPath: string): Promise<LoadedCandidates> {
+  const raw = await readCandidateInput(inputPath);
   const candidates: Candidate[] = [];
   let invalidLineCount = 0;
 
@@ -330,9 +348,9 @@ function printCountSection(title: string, items: CountItem[]): void {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const loaded = loadCandidates(args.inputPath);
+  const loaded = await loadCandidates(args.inputPath);
   const nowSeconds = Math.floor(Date.now() / 1000);
   const minTimestamp = args.sinceHours === null ? null : nowSeconds - (args.sinceHours * 60 * 60);
 
@@ -391,7 +409,7 @@ function main(): void {
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
