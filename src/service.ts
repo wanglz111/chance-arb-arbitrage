@@ -195,7 +195,7 @@ export class CandidateDiscoveryService {
         });
 
         await provider.getNetwork();
-        await this.catchUpFlashLoanSignals();
+        await this.skipToLatestFlashLoanSignals();
         this.stopWsCheckpointLoop = this.startWsCheckpointLoop();
 
         for (const subscription of subscriptions) {
@@ -337,24 +337,11 @@ export class CandidateDiscoveryService {
     this.checkpoints.clearBackfillCursor(checkpointKey);
   }
 
-  private async catchUpFlashLoanSignals(): Promise<void> {
+  private async skipToLatestFlashLoanSignals(): Promise<void> {
     const latest = await this.fetcher.getLatestBlockNumber();
     const targetBlock = Math.max(0, latest - this.config.finalityConfirmations);
-    const lastSyncedBlock = this.checkpoints.getWsSyncedBlock();
-
-    if (lastSyncedBlock === null) {
-      this.checkpoints.setWsSyncedBlock(targetBlock);
-      return;
-    }
-
-    const fromBlock = lastSyncedBlock + 1;
-    if (fromBlock > targetBlock) {
-      return;
-    }
-
-    logInfo(`[ws-catchup] from=${fromBlock} to=${targetBlock}`);
-    await this.backfillRangeByLogs(fromBlock, targetBlock, false);
     this.checkpoints.setWsSyncedBlock(targetBlock);
+    logInfo(`[ws] skip catchup, listening from future signals after block=${targetBlock}`);
   }
 
   private startWsCheckpointLoop(): () => void {
