@@ -31,7 +31,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let daily = false;
   let date = optional("R2_UPLOAD_DATE");
   let key = optional("R2_OBJECT_KEY");
-  let keyPrefix = optional("R2_KEY_PREFIX") ?? "chance-arb/candidates";
+  let keyPrefix = optional("R2_KEY_PREFIX") ?? "candidates";
   let sourcePath = optional("R2_SOURCE_PATH") ?? optional("OUTPUT_PATH") ?? "./data/candidates.jsonl";
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -91,9 +91,9 @@ Required env:
   R2_SECRET_ACCESS_KEY
 
 Optional env:
-  R2_KEY_PREFIX=chance-arb/candidates
-  R2_OBJECT_KEY=chance-arb/candidates/candidates-YYYY-MM-DD.jsonl
-  R2_LATEST_KEY=chance-arb/candidates/latest.jsonl
+  R2_KEY_PREFIX=candidates
+  R2_OBJECT_KEY=candidates/candidates-YYYY-MM-DD.jsonl
+  R2_LATEST_KEY=candidates/latest.jsonl
   R2_SOURCE_PATH=./data/candidates.jsonl
   R2_UPLOAD_DATE=YYYY-MM-DD
   R2_UPLOAD_RETRY_SECONDS=300

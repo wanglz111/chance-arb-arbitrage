@@ -114,8 +114,8 @@ R2_ACCOUNT_ID=your_cloudflare_account_id
 R2_BUCKET=your_bucket
 R2_ACCESS_KEY_ID=your_r2_access_key_id
 R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
-R2_KEY_PREFIX=chance-arb/candidates
-R2_LATEST_KEY=chance-arb/candidates/latest.jsonl
+R2_KEY_PREFIX=candidates
+R2_LATEST_KEY=candidates/latest.jsonl
 R2_UPLOAD_RETRY_SECONDS=300
 ```
 
@@ -125,7 +125,7 @@ R2_UPLOAD_RETRY_SECONDS=300
 docker compose up -d uploader
 ```
 
-上传器会等到每天 UTC 00:00，把前一天的文件上传到 `R2_KEY_PREFIX` 下面，例如 `chance-arb/candidates/candidates-2026-04-29.jsonl`；如果配置了 `R2_LATEST_KEY`，还会额外覆盖一份固定路径的最新快照。
+上传器会等到每天 UTC 00:00，把前一天的文件上传到 `R2_KEY_PREFIX` 下面，例如 `candidates/candidates-2026-04-29.jsonl`；如果配置了 `R2_LATEST_KEY`，还会额外覆盖一份固定路径的最新快照。
 
 如果你要手动补传某一天：
 
