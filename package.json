@@ -9,6 +9,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "start:ws": "LIVE_MODE=ws-flashloan tsx src/index.ts",
+    "analyze:candidates": "tsx scripts/analyze-candidates.ts",
     "analyze:tx": "tsx scripts/analyze-tx.ts",
     "backfill": "tsx scripts/backfill-block-range.ts",
     "view:candidates": "tsx scripts/view-candidates.ts"

@@ -210,6 +210,41 @@ npm run view:candidates
 npm run view:candidates -- ./data/candidates.jsonl
 ```
 
+## 分析 24 小时候选路径
+
+扫描跑满一天后，可以直接把 `jsonl` 喂给离线分析脚本：
+
+```bash
+npm run analyze:candidates -- ./data/candidates.jsonl --since-hours 24 --min-score 6 --top 20
+```
+
+它会在终端输出摘要，并默认写出结构化报告：
+
+```text
+./data/candidate-analysis-report.json
+```
+
+这个报告是后续给 Codex 复盘用的，里面按路径保留了频次、平均分、代表交易、payout、证据和协议组合。它会包含：
+
+- 常见 flash loan 路径
+- 常见 route hint
+- 协议组合
+- 标签组合
+- 高频目标合约
+- 高分样本交易
+
+如果你想指定报告文件名：
+
+```bash
+npm run analyze:candidates -- ./data/candidates-24h.jsonl --since-hours 24 --min-score 6 --report ./data/report-24h.json
+```
+
+如果你是把服务器上的 24 小时结果拷到本地，例如 `./data/candidates-24h.jsonl`：
+
+```bash
+npm run analyze:candidates -- ./data/candidates-24h.jsonl --since-hours 24 --min-score 6
+```
+
 ## 回扫历史区块
 
 ```bash
