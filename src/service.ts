@@ -404,14 +404,17 @@ export class CandidateDiscoveryService {
 
   private async findFlashLoanSignalTransactionHashes(fromBlock: number, toBlock: number): Promise<string[]> {
     const subscriptions = this.getFlashLoanSignalSubscriptions();
-    const logsPerSource = await Promise.all(subscriptions.map((subscription) => (
-      this.fetcher.getLogs({
+
+    const logsPerSource: RawReceipt["logs"][] = [];
+    for (const subscription of subscriptions) {
+      const logs = await this.fetcher.getLogs({
         address: subscription.filter.address,
         fromBlock,
         toBlock,
         topics: subscription.filter.topics
-      })
-    )));
+      });
+      logsPerSource.push(logs);
+    }
 
     return Array.from(new Set(
       logsPerSource
