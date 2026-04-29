@@ -33,6 +33,21 @@ services:
       - default
       - monitor_net
 
+  uploader:
+    image: ${CHANCE_ARB_IMAGE:-ghcr.io/wanglz111/chance-arb-arbitrage:latest}
+    pull_policy: always
+    container_name: chance-arb-uploader
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      R2_SOURCE_PATH: /app/data/candidates.jsonl
+    command: ["node", "dist/scripts/upload-candidates-r2.js", "--daily"]
+    volumes:
+      - ./data:/app/data:ro
+    networks:
+      - default
+
 networks:
   monitor_net:
     external: true
