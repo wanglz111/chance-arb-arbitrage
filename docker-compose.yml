@@ -7,6 +7,7 @@ services:
     env_file:
       - .env
     environment:
+      # Template path. The scanner writes /app/data/candidates-YYYY-MM-DD.jsonl using UTC dates.
       OUTPUT_PATH: /app/data/candidates.jsonl
       CHECKPOINT_PATH: /app/data/checkpoints.json
     command: ["node", "dist/src/index.js"]
@@ -23,6 +24,7 @@ services:
     env_file:
       - .env
     environment:
+      # Template path. The viewer scans matching /app/data/candidates-YYYY-MM-DD.jsonl files.
       CANDIDATES_PATH: /app/data/candidates.jsonl
       VIEWER_HOST: 0.0.0.0
       VIEWER_PORT: 4310
@@ -41,6 +43,7 @@ services:
     env_file:
       - .env
     environment:
+      # Template path. The uploader sends the previous UTC day's dated file at UTC midnight.
       R2_SOURCE_PATH: /app/data/candidates.jsonl
     command: ["node", "dist/scripts/upload-candidates-r2.js", "--daily"]
     volumes:
