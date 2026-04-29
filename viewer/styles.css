@@ -66,7 +66,7 @@ select {
 
 .filter-form {
   display: grid;
-  grid-template-columns: minmax(220px, 1.6fr) repeat(3, minmax(140px, 1fr)) repeat(2, minmax(110px, 0.7fr));
+  grid-template-columns: minmax(120px, 0.7fr) minmax(220px, 1.6fr) repeat(3, minmax(140px, 1fr)) repeat(2, minmax(110px, 0.7fr));
   gap: 10px;
   align-items: end;
 }

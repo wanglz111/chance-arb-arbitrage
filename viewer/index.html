@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Chance Arb Candidate Viewer</title>
-    <link rel="stylesheet" href="/styles.css?v=20260428b" />
+    <link rel="stylesheet" href="/styles.css?v=20260429a" />
   </head>
   <body>
     <div class="page-shell">
@@ -42,6 +42,13 @@
         <p id="datasetMeta" hidden>-</p>
 
         <form id="filterForm" class="filter-form">
+          <label class="field field-short">
+            <span>UTC Day</span>
+            <select id="dateSelect" name="date">
+              <option value="">Latest</option>
+            </select>
+          </label>
+
           <label class="field field-search">
             <span>Search</span>
             <input id="searchInput" name="q" type="search" placeholder="tx hash / address / evidence / route hint" />
@@ -152,6 +159,6 @@
       </article>
     </template>
 
-    <script type="module" src="/app.js?v=20260428b"></script>
+    <script type="module" src="/app.js?v=20260429a"></script>
   </body>
 </html>

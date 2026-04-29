@@ -23,7 +23,10 @@ type DatasetSummary = {
 };
 
 type Dataset = {
+  availableDays: string[];
   candidates: Candidate[];
+  dataPath: string;
+  selectedDate: string | null;
   invalidLineCount: number;
   mtimeMs: number;
   summary: DatasetSummary;
@@ -46,6 +49,7 @@ type CandidateQuery = {
 const projectRoot = process.cwd();
 const viewerDir = path.resolve(projectRoot, "viewer");
 const dataPath = path.resolve(projectRoot, process.argv[2] ?? process.env.CANDIDATES_PATH ?? "./data/candidates.jsonl");
+const dataDir = path.dirname(dataPath);
 const port = Number.parseInt(process.env.VIEWER_PORT ?? "4310", 10);
 const host = process.env.VIEWER_HOST?.trim() || "127.0.0.1";
 
@@ -91,17 +95,63 @@ function buildSummary(candidates: Candidate[]): DatasetSummary {
   };
 }
 
-async function loadDataset(): Promise<Dataset> {
+function candidatePathForDate(date: string): string {
+  const parsed = path.parse(dataPath);
+  return path.join(parsed.dir, `${parsed.name}-${date}${parsed.ext}`);
+}
+
+function candidateDateFromFileName(fileName: string): string | null {
+  const parsed = path.parse(path.basename(dataPath));
+  const escapedName = parsed.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedExt = parsed.ext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = fileName.match(new RegExp(`^${escapedName}-(\\d{4}-\\d{2}-\\d{2})${escapedExt}$`));
+  if (!match) return null;
+  return match[1] ?? null;
+}
+
+async function listAvailableDays(): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(dataDir);
+    return entries
+      .map(candidateDateFromFileName)
+      .filter((value): value is string => value !== null)
+      .sort((left, right) => right.localeCompare(left));
+  } catch {
+    return [];
+  }
+}
+
+async function resolveDatasetPath(requestedDate: string | null): Promise<{ availableDays: string[]; selectedDate: string | null; sourcePath: string }> {
+  const availableDays = await listAvailableDays();
+  const selectedDate = requestedDate ?? availableDays[0] ?? currentUtcDate();
+
+  return {
+    availableDays,
+    selectedDate,
+    sourcePath: candidatePathForDate(selectedDate)
+  };
+}
+
+function currentUtcDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function loadDataset(requestedDate: string | null): Promise<Dataset> {
+  const resolved = await resolveDatasetPath(requestedDate);
+
   let stat;
   try {
-    stat = await fs.stat(dataPath);
+    stat = await fs.stat(resolved.sourcePath);
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String(error.code) : "";
     if (code === "ENOENT") {
       return {
+        availableDays: resolved.availableDays,
         candidates: [],
+        dataPath: resolved.sourcePath,
         invalidLineCount: 0,
         mtimeMs: -1,
+        selectedDate: resolved.selectedDate,
         summary: buildSummary([]),
         updatedAt: null
       };
@@ -109,11 +159,13 @@ async function loadDataset(): Promise<Dataset> {
     throw error;
   }
 
-  if (cache && cache.mtimeMs === stat.mtimeMs) {
+  if (cache && cache.dataPath === resolved.sourcePath && cache.mtimeMs === stat.mtimeMs) {
+    cache.availableDays = resolved.availableDays;
+    cache.selectedDate = resolved.selectedDate;
     return cache;
   }
 
-  const raw = await fs.readFile(dataPath, "utf8");
+  const raw = await fs.readFile(resolved.sourcePath, "utf8");
   const lines = raw.split(/\r?\n/);
   const candidates: Candidate[] = [];
   let invalidLineCount = 0;
@@ -140,9 +192,12 @@ async function loadDataset(): Promise<Dataset> {
   });
 
   cache = {
+    availableDays: resolved.availableDays,
     candidates,
+    dataPath: resolved.sourcePath,
     invalidLineCount,
     mtimeMs: stat.mtimeMs,
+    selectedDate: resolved.selectedDate,
     summary: buildSummary(candidates),
     updatedAt: new Date(stat.mtimeMs).toISOString()
   };
@@ -179,6 +234,11 @@ function parseQuery(url: URL): CandidateQuery {
     ) ? sort : "newest",
     tag: url.searchParams.get("tag")?.trim() ?? ""
   };
+}
+
+function parseDateParam(url: URL): string | null {
+  const value = url.searchParams.get("date")?.trim();
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
 }
 
 function candidateSearchText(candidate: Candidate): string {
@@ -268,10 +328,12 @@ const server = http.createServer(async (request, response) => {
 
   try {
     if (url.pathname === "/api/summary") {
-      const dataset = await loadDataset();
+      const dataset = await loadDataset(parseDateParam(url));
       sendJson(response, {
-        dataPath,
+        availableDays: dataset.availableDays,
+        dataPath: dataset.dataPath,
         invalidLineCount: dataset.invalidLineCount,
+        selectedDate: dataset.selectedDate,
         summary: dataset.summary,
         updatedAt: dataset.updatedAt
       });
@@ -279,7 +341,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (url.pathname === "/api/candidates") {
-      const dataset = await loadDataset();
+      const dataset = await loadDataset(parseDateParam(url));
       const query = parseQuery(url);
       const filtered = filterCandidates(dataset.candidates, query);
       const items = filtered.slice(query.offset, query.offset + query.limit);
@@ -287,11 +349,13 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, {
         items,
         meta: {
-          dataPath,
+          availableDays: dataset.availableDays,
+          dataPath: dataset.dataPath,
           invalidLineCount: dataset.invalidLineCount,
           limit: query.limit,
           offset: query.offset,
           returned: items.length,
+          selectedDate: dataset.selectedDate,
           total: filtered.length,
           updatedAt: dataset.updatedAt
         }
@@ -322,7 +386,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  logInfo(`[viewer] candidates=${dataPath}`);
+  logInfo(`[viewer] candidates=${dataPath} dailyDir=${dataDir}`);
   logInfo(`[viewer] open http://${host}:${port}`);
 });
 

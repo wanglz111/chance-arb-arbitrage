@@ -1,6 +1,7 @@
 const state = {
   autoRefresh: false,
   filters: {
+    date: "",
     flashLoanOnly: false,
     limit: 50,
     minScore: 0,
@@ -21,6 +22,7 @@ const elements = {
   averageScore: document.querySelector("#averageScore"),
   candidateList: document.querySelector("#candidateList"),
   datasetMeta: document.querySelector("#datasetMeta"),
+  dateSelect: document.querySelector("#dateSelect"),
   filterForm: document.querySelector("#filterForm"),
   flashLoanCandidates: document.querySelector("#flashLoanCandidates"),
   flashLoanOnly: document.querySelector("#flashLoanOnly"),
@@ -102,6 +104,33 @@ function setSelectOptions(select, items, fallbackLabel) {
   select.value = items.some((item) => item.value === previous) ? previous : "";
 }
 
+function setDayOptions(select, days, selectedDate) {
+  if (!select) return;
+
+  const previous = select.value;
+  select.innerHTML = "";
+
+  const fallbackOption = document.createElement("option");
+  fallbackOption.value = "";
+  fallbackOption.textContent = days.length > 0 ? "Latest" : "No files";
+  select.append(fallbackOption);
+
+  for (const day of days) {
+    const option = document.createElement("option");
+    option.value = day;
+    option.textContent = day;
+    select.append(option);
+  }
+
+  if (previous === "" && state.filters.date === "") {
+    select.value = "";
+    return;
+  }
+
+  select.value = days.includes(previous) ? previous : selectedDate ?? "";
+  state.filters.date = select.value;
+}
+
 function createChip(text, tone = "neutral") {
   const chip = document.createElement("span");
   chip.className = `chip chip-${tone}`;
@@ -124,6 +153,7 @@ function appendChips(container, items, tone) {
 }
 
 function syncFiltersFromForm() {
+  state.filters.date = elements.dateSelect.value;
   state.filters.q = elements.searchInput.value.trim();
   state.filters.tag = elements.tagSelect.value;
   state.filters.protocol = elements.protocolSelect.value;
@@ -161,7 +191,9 @@ function paramsFromFilters() {
 function renderSummary(summaryPayload) {
   state.summary = summaryPayload;
 
-  const { summary, updatedAt, invalidLineCount, dataPath } = summaryPayload;
+  const { availableDays, selectedDate, summary, updatedAt, invalidLineCount, dataPath } = summaryPayload;
+  setDayOptions(elements.dateSelect, availableDays ?? [], selectedDate ?? "");
+
   elements.totalCandidates.textContent = formatNumber(summary.totalCandidates);
   elements.flashLoanCandidates.textContent = formatNumber(summary.flashLoanCandidates);
   elements.payoutCandidates.textContent = formatNumber(summary.payoutCandidates);
@@ -222,14 +254,16 @@ function renderCandidates(payload) {
   const totalPages = Math.max(1, Math.ceil(meta.total / meta.limit));
 
   elements.resultsTitle.textContent = `Candidates · ${formatNumber(meta.total)}`;
-  elements.resultsMeta.textContent = `${pageStart}-${pageEnd} of ${formatNumber(meta.total)} · updated ${formatUpdatedAt(meta.updatedAt)} · invalid lines ${meta.invalidLineCount}`;
+  elements.resultsMeta.textContent = `${pageStart}-${pageEnd} of ${formatNumber(meta.total)} · day ${meta.selectedDate ?? "latest"} · updated ${formatUpdatedAt(meta.updatedAt)} · invalid lines ${meta.invalidLineCount}`;
   elements.pageInfo.textContent = `Page ${currentPage} / ${totalPages}`;
   elements.prevButton.disabled = meta.offset === 0;
   elements.nextButton.disabled = meta.offset + meta.returned >= meta.total;
 }
 
 async function loadSummary() {
-  const response = await fetch("/api/summary");
+  const params = new URLSearchParams();
+  if (state.filters.date) params.set("date", state.filters.date);
+  const response = await fetch(`/api/summary?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`Summary request failed: ${response.status}`);
   }
@@ -289,7 +323,7 @@ elements.autoRefreshToggle.addEventListener("change", () => {
 elements.filterForm.addEventListener("change", () => {
   syncFiltersFromForm();
   state.filters.offset = 0;
-  void loadCandidates();
+  void refreshAll();
 });
 
 let searchDebounce = null;
